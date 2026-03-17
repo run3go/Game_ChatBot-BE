@@ -1,5 +1,3 @@
-import re
-
 class IntentRouter:
 
     SIMPLE_KEYWORDS = ["스킬", "보석", "각인", "아바타", "장비", "아크그리드", "아크패시브",
