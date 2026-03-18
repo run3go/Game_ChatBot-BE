@@ -4,7 +4,7 @@ class IntentRouter:
                        "능력치", "카드", "내실", "수집"]
     TRADING_KEYWORDS = ["가격", "시세", "거래소", "경매장", "얼마"]
 
-    COMPLEX_KEYWORDS = ["몇", "갯수", "비교", "더", "높", "계산"]
+    COMPLEX_KEYWORDS = ["차이", "몇", "갯수", "비교", "더", "높", "계산", "언제", "어떻게", "왜", "무엇을", "어디서"]
 
     def route(self, question):
 

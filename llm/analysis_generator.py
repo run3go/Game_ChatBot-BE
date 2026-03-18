@@ -6,7 +6,7 @@ class AnalysisGenerator:
     def __init__(self, llm):
         self.llm = llm
 
-    def analyze(self, question: str, table_info: str):
+    def analyze(self, question: str, table_info: str) -> QuestionAnalysis:
 
         prompt = ChatPromptTemplate.from_template("""
         너는 로스트아크 질문 분석기야.
@@ -25,10 +25,12 @@ class AnalysisGenerator:
         - CHARACTER: 캐릭터 정보 단순 조회 (목록 그대로 보여주면 되는 경우)
         - COMPLEX: 계산, 비교, 필터링 등 추가 처리 필요
         - TRADING: 거래소 / 경매장 가격 관련
+        - API: 실시간으로 API를 통해 데이터 요청
 
         --------------------------------------
 
         [UI_TYPE]
+        - EXPEDITION: 원정대
         - SKILL, ENGRAVING, AVATAR, ARK_GRID, ARK_PASSIVE, COLLECTIBLE
         - MARKET_ITEMS, AUCTION_ITEMS
         - PROFILE: 사용자가 명시적으로 "프로필", "레벨", "능력치" 등을 언급했을 때만 사용.
@@ -46,6 +48,8 @@ class AnalysisGenerator:
         2. UI_TYPE이 'ETC'가 아니라면 아래 테이블 맵에서 매칭되는 테이블을 전부 가져와.
 
         {ui_table_map}
+
+        3. UI_TYPE이 'EXPEDTION'라면 테이블은 빈 테이블을 반환해.
 
         --------------------------------------
 
@@ -66,7 +70,8 @@ class AnalysisGenerator:
         1. "몇", "갯수", "비교", "더", "높" → COMPLEX
         2. "가격", "시세", "거래소", "경매장", "얼마" → TRADING
         3. "스킬", "보석", "각인", "아바타", "장비", "아크그리드", "아크패시브", "능력치", "카드" → CHARACTER
-        4. 애매하면 COMPLEX
+        4. "원정대" → API
+        5. 애매하면 COMPLEX
 
         --------------------------------------
 

@@ -42,7 +42,7 @@ class SQLGenerator:
             --------------------------------------
 
             [비교 규칙]
-            - 각인: 'discription' 속성 제외
+            - 각인: 'discription' 속성 제외           
 
             --------------------------------------
 
@@ -67,10 +67,9 @@ class SQLGenerator:
         
         return self._clean_sql(result.content)
     
-    def generate_character(self, question: str, db):
+    def generate_character(self, question: str, db, nicknames: str):
 
         ui_type = self._detect_ui_type(question)
-        nicknames = extract_nicknames(db, question)
 
         tables = UI_TABLE_MAP.get(ui_type)
 
