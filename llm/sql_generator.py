@@ -1,23 +1,24 @@
 from langchain_core.prompts import ChatPromptTemplate
 from utils.text_parser import extract_nicknames
 
+UI_TABLE_MAP = {
+    "SKILL": ["armory_skills_tb", "armory_gem_effects_tb", "armory_gem_tb"],
+    "ARK_GRID": ["ark_grid_cores_tb", "ark_grid_effects_tb", "ark_grid_gems_tb"],
+    "ARK_PASSIVE": ["ark_passive_effects_tb", "ark_passive_points_tb"],
+    "ENGRAVING": ["armory_engravings_tb"],
+    "AVATAR": ["armory_avatars_tb"],
+    "COLLECTIBLE": ["armory_collectibles_tb", "armory_collectible_details_tb"],
+    "PROFILE": ["armory_profile_tb", "armory_equipment_tb", "armory_card_tb", "armory_card_effects_tb", "armory_gem_effects_tb", "armory_gem_tb"],
+    "TOTAL_INFO": ["armory_profile_tb", "armory_equipment_tb", "armory_card_tb", "armory_card_effects_tb", "ark_grid_cores_tb", "ark_grid_effects_tb", "ark_grid_gems_tb", "ark_passive_effects_tb", "ark_passive_points_tb",
+                "armory_engravings_tb", "armory_avatars_tb", "armory_collectibles_tb", "armory_collectible_details_tb", "armory_skills_tb", "armory_gem_effects_tb", "armory_gem_tb"],
+    "MARKET_ITEMS": ["market_items_tb"],
+    "AUCTION_ITEMS": ["auction_items_tb"]
+}
+
 class SQLGenerator:
 
     def __init__(self, llm):
         self.llm = llm
-        self.UI_TABLE_MAP = {
-            "SKILL": ["armory_skills_tb", "armory_gem_effects_tb", "armory_gem_tb"],
-            "ARK_GRID": ["ark_grid_cores_tb", "ark_grid_effects_tb", "ark_grid_gems_tb"],
-            "ARK_PASSIVE": ["ark_passive_effects_tb", "ark_passive_points_tb"],
-            "ENGRAVING": ["armory_engravings_tb"],
-            "AVATAR": ["armory_avatars_tb"],
-            "COLLECTIBLE": ["armory_collectibles_tb", "armory_collectible_details_tb"],
-            "PROFILE": ["armory_profile_tb", "armory_equipment_tb", "armory_card_tb", "armory_card_effects_tb", "armory_gem_effects_tb", "armory_gem_tb"],
-            "TOTAL_INFO": ["armory_profile_tb", "armory_equipment_tb", "armory_card_tb", "armory_card_effects_tb", "ark_grid_cores_tb", "ark_grid_effects_tb", "ark_grid_gems_tb", "ark_passive_effects_tb", "ark_passive_points_tb",
-                        "armory_engravings_tb", "armory_avatars_tb", "armory_collectibles_tb", "armory_collectible_details_tb", "armory_skills_tb", "armory_gem_effects_tb", "armory_gem_tb"],
-            "MARKET_ITEMS": ["market_items_tb"],
-            "AUCTION_ITEMS": ["auction_items_tb"]
-        }
 
     def generate(self, question: str, analysis, schema):
         prompt = ChatPromptTemplate.from_template("""
@@ -40,12 +41,8 @@ class SQLGenerator:
 
             --------------------------------------
 
-            [비교 지침]                                             
-            - '아크 그리드' 비교
-                - 고대/유물/전설/영웅 코어 갯수 비교
-                - 어떤 효과가 더 높은지 비교               
-            - '각인' 비교
-                - 설명을 제외한 나머지 속성을 비교
+            [비교 규칙]
+            - 각인: 'discription' 속성 제외
 
             --------------------------------------
 
@@ -75,7 +72,7 @@ class SQLGenerator:
         ui_type = self._detect_ui_type(question)
         nicknames = extract_nicknames(db, question)
 
-        tables = self.UI_TABLE_MAP.get(ui_type)
+        tables = UI_TABLE_MAP.get(ui_type)
 
         queries = []
 

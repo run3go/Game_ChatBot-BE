@@ -8,9 +8,6 @@ class IntentRouter:
 
     def route(self, question):
 
-        if "정보" in question:
-            return "COMPLEX"
-
         for word in self.COMPLEX_KEYWORDS:
             if word in question:
                 return "COMPLEX"

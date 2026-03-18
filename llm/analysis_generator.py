@@ -1,5 +1,6 @@
 from langchain_core.prompts import ChatPromptTemplate
 from output_types import QuestionAnalysis
+from llm.sql_generator import UI_TABLE_MAP
 
 class AnalysisGenerator:
     def __init__(self, llm):
@@ -28,18 +29,23 @@ class AnalysisGenerator:
         --------------------------------------
 
         [UI_TYPE]
-        - PROFILE, SKILL, ENGRAVING, AVATAR, ARK_GRID, ARK_PASSIVE, COLLECTIBLE
+        - SKILL, ENGRAVING, AVATAR, ARK_GRID, ARK_PASSIVE, COLLECTIBLE
         - MARKET_ITEMS, AUCTION_ITEMS
-        - TOTAL_INFO 
+        - PROFILE: 사용자가 명시적으로 "프로필", "레벨", "능력치" 등을 언급했을 때만 사용.
+        - TOTAL_INFO: 특정 카테고리(스킬 등) 언급 없이 닉네임만 있거나 "정보"를 요청할 때의 **기본 UI 타입**.
         - ETC: INTENT가 "COMPLEX"일 경우 UI_TYPE은 반드시 "ETC"이다.
 
         --------------------------------------
 
         [TABLE 선택 기준]
-        아래 테이블 설명을 참고해서 필요한 테이블을 선택해.
+        1. UI_TYPE이 'ETC'라면 아래 테이블 설명을 참고해서 필요한 테이블을 선택해.
         (여러 개 가능)
 
         {table_info}
+        
+        2. UI_TYPE이 'ETC'가 아니라면 아래 테이블 맵에서 매칭되는 테이블을 전부 가져와.
+
+        {ui_table_map}
 
         --------------------------------------
 
@@ -84,5 +90,9 @@ class AnalysisGenerator:
         structured_llm = self.llm.with_structured_output(QuestionAnalysis)
         chain = prompt | structured_llm
         
-        return chain.invoke({"question": question, "table_info": table_info})
+        return chain.invoke({
+            "question": question, 
+            "table_info": table_info, 
+            "ui_table_map": UI_TABLE_MAP
+            })
         
