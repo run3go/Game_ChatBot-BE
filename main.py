@@ -1,8 +1,11 @@
 from fastapi import FastAPI, Depends
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
+from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
+import json
 
 from database import get_db, SessionLocal
 from service.ai_service import AIService
@@ -41,10 +44,30 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-@app.get("/ask")
-def ask_ai(question: str, db: Session = Depends(get_db)):
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_methods=["*"],
+    allow_headers=["*"]
+)
+
+@app.get("/ask/stream")
+def ask_ai_stream(question: str, db: Session = Depends(get_db)):
 
     service = AIService(llm, db)
     result = service.ask(question)
 
-    return {"result": result}
+    def generate():
+        if isinstance(result, dict):
+            yield f"data: {json.dumps({'type': 'structured', 'payload': result})}\n\n"
+        else:
+            for chunk in result:
+                if chunk:
+                    yield f"data: {json.dumps({'type': 'text', 'content': chunk})}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )

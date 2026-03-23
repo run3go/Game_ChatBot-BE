@@ -1,12 +1,11 @@
 from langchain_core.prompts import ChatPromptTemplate
-from utils.text_parser import extract_nicknames
 
 UI_TABLE_MAP = {
     "SKILL": ["armory_skills_tb", "armory_gem_effects_tb", "armory_gem_tb"],
     "ARK_GRID": ["ark_grid_cores_tb", "ark_grid_effects_tb", "ark_grid_gems_tb"],
     "ARK_PASSIVE": ["ark_passive_effects_tb", "ark_passive_points_tb"],
     "ENGRAVING": ["armory_engravings_tb"],
-    "AVATAR": ["armory_avatars_tb"],
+    "AVATAR": ["armory_avatars_tb", "armory_profile_tb"],
     "COLLECTIBLE": ["armory_collectibles_tb", "armory_collectible_details_tb"],
     "PROFILE": ["armory_profile_tb", "armory_equipment_tb", "armory_card_tb", "armory_card_effects_tb", "armory_gem_effects_tb", "armory_gem_tb"],
     "TOTAL_INFO": ["armory_profile_tb", "armory_equipment_tb", "armory_card_tb", "armory_card_effects_tb", "ark_grid_cores_tb", "ark_grid_effects_tb", "ark_grid_gems_tb", "ark_passive_effects_tb", "ark_passive_points_tb",
@@ -27,8 +26,8 @@ class SQLGenerator:
             --------------------------------------
 
             [출력 규칙]
-            - 반드시 제공된 테이블만 사용해.
-            - SQL만 출력해.
+            - 반드시 [스키마]에 명시된 테이블만 사용해. 그 외 테이블(예: characters, users 등)은 절대 사용 금지.
+            - SQL만 출력해. 설명 금지.
             - 테이블에 접근할 때는 접두사로 lostark.를 사용해.
             
             --------------------------------------
@@ -67,29 +66,23 @@ class SQLGenerator:
         
         return self._clean_sql(result.content)
     
-    def generate_character(self, question: str, db, nicknames: str):
-
-        ui_type = self._detect_ui_type(question)
-
-        tables = UI_TABLE_MAP.get(ui_type)
-
+    def generate_character_json(self, nicknames: list[str], tables: list[str]):
         queries = []
 
         for nickname in nicknames:
-            for table in tables:
-                sql = f"""
-                SELECT *
-                FROM lostark.{table}
-                WHERE character_name = '{nickname}'
-                """
-                queries.append({
-                    "nickname": nickname,
-                    "table": table,
-                    "sql": sql.strip()
-                })
+            subqueries = ",\n".join(
+                f"  (SELECT COALESCE(json_agg(t.*), '[]'::json) FROM lostark.{table} t WHERE t.character_name = '{nickname}') AS {table}"
+                for table in tables
+            )
+            sql = f"SELECT\n{subqueries}"
 
-        return queries, ui_type
-    
+            queries.append({
+                "nickname": nickname,
+                "sql": sql.strip()
+            })
+
+        return queries
+
     def _detect_ui_type(self, question: str):
 
         if "스킬" in question:

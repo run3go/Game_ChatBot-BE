@@ -6,29 +6,42 @@ class AnswerGenerator:
     def __init__(self, llm):
         self.llm = llm
 
-    def generate(self, question: str, data):
-        data = [dict(row) for row in data]
-        
+    def answer_general(self, question: str):
         prompt = ChatPromptTemplate.from_template("""
-            너는 로스트아크 AI 비서야.                                          
+            너는 로스트아크 AI 비서야.
+            DB 조회 없이 게임 지식을 바탕으로 질문에 답해.
+            답변은 간결하고 정확하게 마크다운 형식으로 작성해.
+
+            [질문]
+            {question}
+        """)
+        chain = prompt | self.llm
+        for chunk in chain.stream({"question": question}):
+            yield chunk.content
+
+    def answer(self, question: str, data):
+        data = [dict(row) for row in data]
+
+        prompt = ChatPromptTemplate.from_template("""
+            너는 로스트아크 AI 비서야.
             데이터를 기반으로 자연스럽게 설명해.
 
             --------------------------------------
-                                                  
+
             [UI 적용 가이드]
             - '아크 그리드'/'수치(신속, 전투력 등)' 데이터: 반드시 [표]를 사용하여 비교하고, 더 높은 값에 볼드체를 적용해.
                 - 표는 절대 나눠서 사용하지 말고, 하나에 통합해서 보여줘.
                 - 비교하는 수치가 하나일 때만 차잇값을 보여줘.
-                - 능력치를 비교할 때는, 
+                - 능력치를 비교할 때는,
 
-            - '아크 그리드' 
+            - '아크 그리드'
                 - 캐릭터 이름(👤 닉네임)을 제목으로 쓰고, 아래에 해당 캐릭터의 슬롯 정보를 표로 출력해.
                 - [표 컬럼]: 슬롯 분류(질서의 해/달/별 등), 코어 이름, 등급, 포인트.
                 - 모든 비교 캐릭터에 대해 각각 작성해.
                 - 아크 그리드를 비교할 때 반드시 함께 보여줘.
-                                                  
+
             - '각인': [불렛 포인트]로 나열 (단, 어빌리티 스톤 0레벨은 제외)
-                                                  
+
             - '아크 패시브' 데이터: 두 캐릭터의 '깨달음' 탭 '1티어' 효과명을 대조하여 결정해.
                     1. 두 캐릭터의 '깨달음 1티어' 효과가 [같을 경우]:
                         - [포인트/레벨 통합 비교 표]를 출력해.
@@ -38,19 +51,20 @@ class AnswerGenerator:
                         - [포인트/레벨 통합 비교 표]만 출력해.
                         - 상세 효과 비교 표(진화/깨달음/도약)는 아예 생략해.
                         - 포인트나 레벨이 서로 같은 경우에는 볼드체를 절대 적용하지마.
-                                                  
+
             - 이외에 추가적인 분석은 아예 넣지마.
 
             --------------------------------------
 
             [핵심 금지 사항]
             - 답변 내에 "판단", "비교한 결과", "효과가 달라서", "~만 비교했습니다"라는 말을 절대 포함하지 마.
-            - 분석 과정이나 필터링 기준을 사용자에게 설명하지 마. 
+            - 분석 과정이나 필터링 기준을 사용자에게 설명하지 마.
             - 그냥 처음부터 보여주기로 한 데이터만 존재했던 것처럼 담백하게 출력해.
+            - 응답을 코드블록(```)으로 절대 감싸지 마. 마크다운을 직접 출력해.
 
             --------------------------------------
 
-            [답변 예시]
+             [답변 예시]
 
                 | 항목 | 첫번째도구 | 황로드유 |
                 | :--- | :---: | :---: |
@@ -142,18 +156,18 @@ class AnswerGenerator:
 
 
             --------------------------------------
-                                                  
+
             [질문]
             {question}
 
             [데이터(JSON)]
             {data}
-                                                  
         """)
 
         chain = prompt | self.llm
 
-        return chain.invoke({
+        for chunk in chain.stream({
             "question": question,
             "data": json.dumps(data, ensure_ascii=False, default=float)
-        }).content
+        }):
+            yield chunk.content

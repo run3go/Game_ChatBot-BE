@@ -34,7 +34,7 @@ class AnalysisGenerator:
         - SKILL, ENGRAVING, AVATAR, ARK_GRID, ARK_PASSIVE, COLLECTIBLE
         - MARKET_ITEMS, AUCTION_ITEMS
         - PROFILE: 사용자가 명시적으로 "프로필", "레벨", "능력치" 등을 언급했을 때만 사용.
-        - TOTAL_INFO: 특정 카테고리(스킬 등) 언급 없이 닉네임만 있거나 "정보"를 요청할 때의 **기본 UI 타입**.
+        - TOTAL_INFO: 특정 카테고리(스킬 등) 언급 없이 닉네임만 있거나, "정보", "통합 정보", "전체 정보" 등 포괄적인 정보를 요청할 때의 **기본 UI 타입**.
         - ETC: INTENT가 "COMPLEX"일 경우 UI_TYPE은 반드시 "ETC"이다.
 
         --------------------------------------
@@ -71,7 +71,8 @@ class AnalysisGenerator:
         2. "가격", "시세", "거래소", "경매장", "얼마" → TRADING
         3. "스킬", "보석", "각인", "아바타", "장비", "아크그리드", "아크패시브", "능력치", "카드" → CHARACTER
         4. "원정대" → API
-        5. 애매하면 COMPLEX
+        5. 닉네임만 있거나, "정보", "통합 정보", "전체 정보" 등 특정 카테고리 없이 포괄적으로 묻는 경우 → TOTAL_INFO (intent: CHARACTER)
+        6. 애매하면 COMPLEX
 
         --------------------------------------
 

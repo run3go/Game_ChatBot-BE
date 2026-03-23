@@ -2,13 +2,13 @@ from sqlalchemy import text
 
 from router.intent_router import IntentRouter
 from sql.schema_builder import SchemaBuilder
-from llm.sql_generator import SQLGenerator
+from llm.sql_generator import SQLGenerator, UI_TABLE_MAP
 from llm.analysis_generator import AnalysisGenerator
 from llm.answer_generator import AnswerGenerator
 
 from utils.text_parser import extract_nicknames
 from api.lostark_api import get_expedition
-from service.nickname_service import validate_nickname
+
 
 class AIService:
 
@@ -20,50 +20,51 @@ class AIService:
         self.answer_generator = AnswerGenerator(llm)
         self.schema_builder = SchemaBuilder(db)
 
+    # 메인 함수
     def ask(self, question: str):
-        # 닉네임 파싱
         nicknames = extract_nicknames(self.db, question)
-
-        # 사용자 의도 파악 및 라우팅
         intent = self.router.route(question)
 
-        # 캐릭터 관련 질문
         if intent == "CHARACTER":
-            queries, ui_type = self.sql_generator.generate_character(question, self.db, nicknames)
+            return self._handle_character(question, nicknames)
 
-            data = {}
-
-            for q in queries:
-                result = self.db.execute(text(q["sql"])).mappings().all()
-                data[q["table"]] = result
-
-            return {
-                "ui_type": ui_type,
-                "data": data
-            }
-        
-        # if intent == "TRADING":
-        
-        # if intent == "COMPLEX":
         table_info = self.schema_builder.build_summary()
         analysis = self.analysis_generator.analyze(question, table_info)
 
-        if analysis.ui_type == "EXPEDITION" and analysis.intent == "API":
-            target_name = nicknames[0] if nicknames else analysis.nicknames[0]
-            print(target_name)
-            data = get_expedition(target_name)
-            
-            return {
-                "ui_type": analysis.ui_type,
-                "data": data
-            }
+        if analysis.ui_type == "TOTAL_INFO":
+            target = nicknames[0] if nicknames else analysis.nicknames[0]
+            return self._fetch_character_data(target, UI_TABLE_MAP["TOTAL_INFO"], "TOTAL_INFO")
 
+        return self._handle_complex(question, analysis)
+
+    # 캐릭터 관련 질문
+    def _handle_character(self, question: str, nicknames: list):
+        if not nicknames:
+            return self.answer_generator.answer_general(question)
+
+        ui_type = self.sql_generator._detect_ui_type(question)
+        tables = UI_TABLE_MAP.get(ui_type, UI_TABLE_MAP["PROFILE"])
+        return self._fetch_character_data(nicknames[0], tables, ui_type)
+
+    # DB 접근 후 데이터 반환
+    def _fetch_character_data(self, nickname: str, tables: list, ui_type: str) -> dict:
+        queries = self.sql_generator.generate_character_json([nickname], tables)
+        row = self.db.execute(text(queries[0]["sql"])).mappings().fetchone()
+        return {"ui_type": ui_type, "data": dict(row) if row else {}}
+
+    # 복잡한 질문 판단 및 
+    def _handle_complex(self, question: str, analysis):
         schema = self.schema_builder.build(analysis.relevant_tables)
         sql = self.sql_generator.generate(question, analysis, schema)
-
+        self._validate_tables(sql, schema)
         result = self.db.execute(text(sql)).mappings().all()
+        return self.answer_generator.answer(question, result)
 
-        answer = self.answer_generator.generate(question, result)
-
-        return answer
+    # 할루시네이션 예외 처리
+    def _validate_tables(self, sql: str, schema: dict):
+        allowed = set(schema.keys())
+        used = {word.split(".")[-1] for word in sql.split() if "lostark." in word}
+        hallucinated = used - allowed
+        if hallucinated:
+            raise ValueError(f"LLM이 허용되지 않은 테이블을 사용했습니다: {hallucinated}")
                     
