@@ -6,17 +6,29 @@ class AnswerGenerator:
     def __init__(self, llm):
         self.llm = llm
 
-    def answer_general(self, question: str):
+    def answer_general(self, question: str, history: list[dict] | None = None):
         prompt = ChatPromptTemplate.from_template("""
             너는 로스트아크 AI 비서야.
             DB 조회 없이 게임 지식을 바탕으로 질문에 답해.
             답변은 간결하고 정확하게 마크다운 형식으로 작성해.
+            이전 대화 맥락을 반드시 참고해서 답해.
+
+            [이전 대화]
+            {history}
 
             [질문]
             {question}
         """)
+        history_text = ""
+        if history:
+            lines = [
+                f"{'사용자' if m['role'] == 'user' else 'AI'}: {m['content']}"
+                for m in history[-6:]
+            ]
+            history_text = "\n".join(lines)
+
         chain = prompt | self.llm
-        for chunk in chain.stream({"question": question}):
+        for chunk in chain.stream({"question": question, "history": history_text or "없음"}):
             yield chunk.content
 
     def answer(self, question: str, data):

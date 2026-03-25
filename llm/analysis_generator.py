@@ -1,12 +1,12 @@
 from langchain_core.prompts import ChatPromptTemplate
-from output_types import QuestionAnalysis
+from output_types import QuestionAnalysis, CharacterQueryType
 from llm.sql_generator import UI_TABLE_MAP
 
 class AnalysisGenerator:
     def __init__(self, llm):
         self.llm = llm
 
-    def analyze(self, question: str, table_info: str) -> QuestionAnalysis:
+    def analyze(self, question: str, table_info: str, history: list[dict] | None = None) -> QuestionAnalysis:
 
         prompt = ChatPromptTemplate.from_template("""
         너는 로스트아크 질문 분석기야.
@@ -22,10 +22,11 @@ class AnalysisGenerator:
         --------------------------------------
 
         [INTENT 종류]
-        - CHARACTER: 캐릭터 정보 단순 조회 (목록 그대로 보여주면 되는 경우)
+        - CHARACTER: 특정 캐릭터의 데이터 조회
         - COMPLEX: 계산, 비교, 필터링 등 추가 처리 필요
         - TRADING: 거래소 / 경매장 가격 관련
         - API: 실시간으로 API를 통해 데이터 요청
+        - GENERAL: DB 조회 없이 게임 지식으로 답할 수 있는 질문, 또는 일반 대화
 
         --------------------------------------
 
@@ -56,7 +57,8 @@ class AnalysisGenerator:
         [닉네임 추출 규칙]
         - 조사 제거 (은,는,이,가,을,를,의 등)
         - 여러 명 가능
-        - 없으면 []
+        - 현재 질문에 없으면 이전 대화에서 언급된 닉네임을 가져와
+        - 그래도 없으면 []
 
         --------------------------------------
 
@@ -72,7 +74,12 @@ class AnalysisGenerator:
         3. "스킬", "보석", "각인", "아바타", "장비", "아크그리드", "아크패시브", "능력치", "카드" → CHARACTER
         4. "원정대" → API
         5. 닉네임만 있거나, "정보", "통합 정보", "전체 정보" 등 특정 카테고리 없이 포괄적으로 묻는 경우 → TOTAL_INFO (intent: CHARACTER)
-        6. 애매하면 COMPLEX
+        6. DB 조회 없이 게임 지식으로 답할 수 있는 질문, 또는 "안녕" 같은 일반 대화 → GENERAL
+        7. 애매하면 COMPLEX
+
+        [is_specific_question 판단]
+        - False: 데이터를 화면에 표시하길 원하는 경우 ("첫번째도구 스킬", "황로드유 각인 보여줘")
+        - True: 특정 질문의 답변을 원하는 경우 ("카운터 스킬이 뭐야", "가장 높은 각인 레벨이 얼마야")
 
         --------------------------------------
 
@@ -88,17 +95,30 @@ class AnalysisGenerator:
 
         --------------------------------------
 
+        [이전 대화]
+        {history}
+
         [사용자 질문]
         {question}
-                                                  
+
         """)
 
         structured_llm = self.llm.with_structured_output(QuestionAnalysis)
         chain = prompt | structured_llm
         
+        history_text = ""
+        if history:
+            lines = [
+                f"{'사용자' if m['role'] == 'user' else 'AI'}: {m['content']}"
+                for m in history[-6:]
+            ]
+            history_text = "\n".join(lines)
+
         return chain.invoke({
-            "question": question, 
-            "table_info": table_info, 
-            "ui_table_map": UI_TABLE_MAP
+            "question": question,
+            "table_info": table_info,
+            "ui_table_map": UI_TABLE_MAP,
+            "history": history_text or "없음",
             })
+
         

@@ -1,4 +1,6 @@
 __pycache__/
+**/__pycache__/
+
 *.py[cod]
 *$py.class
 
@@ -22,3 +24,5 @@ postgres.yaml
 Dockerfile
 fastapi.tar
 kind.exe
+
+*.log
