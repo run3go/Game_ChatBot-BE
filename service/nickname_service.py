@@ -14,6 +14,8 @@ def load_nicknames(db):
 
    NICKNAME_SET = {r[0] for r in rows}
 
+   return len(NICKNAME_SET)
+
 # 캐시에 존재하는 닉네임인지 확인
 def is_cached_nickname(word):
    return word in NICKNAME_SET

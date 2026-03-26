@@ -32,8 +32,8 @@ async def lifespan(_: FastAPI):
     db = SessionLocal()
 
     try:
-        load_nicknames(db)
-        print(f"성공적으로 {len(NICKNAME_SET)}개의 닉네임을 로드했습니다.")
+        length = load_nicknames(db)
+        print(f"성공적으로 {length}개의 닉네임을 로드했습니다.")
     except Exception as e:
         print(f"닉네임 로드 중 오류 발생: {e}")
     finally:
