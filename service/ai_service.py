@@ -1,6 +1,6 @@
 from sqlalchemy import text
 
-from sql.schema_builder import SchemaBuilder
+from sql.schema_store import SCHEMA_STORE
 from llm.sql_generator import SQLGenerator, UI_TABLE_MAP
 from llm.analysis_generator import AnalysisGenerator
 from llm.answer_generator import AnswerGenerator
@@ -15,16 +15,16 @@ class AIService:
         self.sql_generator = SQLGenerator(llm)
         self.analysis_generator = AnalysisGenerator(llm)
         self.answer_generator = AnswerGenerator(llm)
-        self.schema_builder = SchemaBuilder(db)
+
 
     # 메인 함수
     def ask(self, question: str, pending: dict | None = None, history: list[dict] | None = None):
         if pending:
             return self._resolve_pending(question, pending)
 
-        table_info = self.schema_builder.build_summary()
+        table_info = SCHEMA_STORE.search(question)
         candidates = extract_nicknames(self.db, question)
-        analysis = self.analysis_generator.analyze(question, table_info, history, candidates)
+        analysis = self.analysis_generator.analyze(question, history, candidates)
 
         nicknames = analysis.nicknames or candidates
 
@@ -38,11 +38,7 @@ class AIService:
         if analysis.intent == "CHARACTER":
             return self._handle_character(question, nicknames, analysis, history)
 
-        if analysis.ui_type == "TOTAL_INFO":
-            target = nicknames[0] if nicknames else analysis.nicknames[0]
-            return self._fetch_character_data(target, UI_TABLE_MAP["TOTAL_INFO"], "TOTAL_INFO")
-
-        return self._handle_complex(question, analysis, history)
+        return self._handle_complex(question, analysis, history, table_info)
 
     # 캐릭터 관련 질문
     def _handle_character(self, question: str, nicknames: list, analysis, history: list[dict] | None = None):
@@ -80,10 +76,8 @@ class AIService:
         return {"ui_type": ui_type, "data": dict(row) if row else {}, "nickname": nickname}
 
     # 복잡한 질문 처리
-    def _handle_complex(self, question: str, analysis, history: list[dict]):
-        # 테이블 정보를 찾지 못할 경우, 모든 테이블의 
-        tables = analysis.relevant_tables or list({t for ts in UI_TABLE_MAP.values() for t in ts})
-        schema = self.schema_builder.build(tables)
+    def _handle_complex(self, question: str, analysis, history: list[dict], table_info: dict):
+        schema = SCHEMA_STORE.get_schema(list(table_info.keys()))
         sql = self.sql_generator.generate(question, analysis, schema)
         self._validate_tables(sql, schema)
         result = self.db.execute(text(sql)).mappings().all()

@@ -1,12 +1,11 @@
 from langchain_core.prompts import ChatPromptTemplate
 from output_types import QuestionAnalysis
-from llm.sql_generator import UI_TABLE_MAP
 
 class AnalysisGenerator:
     def __init__(self, llm):
         self.llm = llm
 
-    def analyze(self, question: str, table_info: str, history: list[dict] | None = None, candidates: list[str] | None = None) -> QuestionAnalysis:
+    def analyze(self, question: str, history: list[dict] | None = None, candidates: list[str] | None = None) -> QuestionAnalysis:
 
         prompt = ChatPromptTemplate.from_template("""
         너는 로스트아크 질문 분석기야.
@@ -24,13 +23,6 @@ class AnalysisGenerator:
         - PROFILE: 사용자가 명시적으로 "프로필", "레벨", "능력치" 등을 언급했을 때만 사용.
         - TOTAL_INFO: 특정 카테고리 언급 없이 닉네임만 있거나 포괄적인 정보를 요청할 때의 기본 UI 타입.
         - ETC: INTENT가 "COMPLEX"이면 UI_TYPE은 반드시 "ETC".
-
-        [TABLE 선택]
-        - UI_TYPE이 'ETC'이면 아래 테이블 설명을 참고해서 필요한 테이블 선택. (여러 개 가능)
-        {table_info}
-        - UI_TYPE이 'ETC'가 아니면 아래 테이블 맵에서 매칭되는 테이블을 전부 가져와.
-        {ui_table_map}
-        - UI_TYPE이 'EXPEDITION'이면 relevant_tables는 빈 배열.
 
         [닉네임 추출]
         - DB에서 찾은 후보 닉네임: {candidates}
@@ -55,12 +47,11 @@ class AnalysisGenerator:
         6. 애매하면 COMPLEX
 
         [aggregation_type]
-        - DISPLAY: 데이터를 화면에 표시 ("황로드유 각인 보여줘")
+        - DISPLAY: 닉네임+카테고리 조합이거나 데이터를 화면에 보여주는 경우 기본값. ("황로드유 스킬", "첫번째도구 각인", "각인 뭐 있어?")
         - COMPARE: 두 명 이상 비교 ("A랑 B 비교해줘")
         - COUNT: 단일 개수 ("몇 개야?") — 이전 대화가 COUNT였고 후속 질문이면 COUNT 유지
         - COUNT_LIST: 항목별 개수 목록 ("스킬별 보석 개수는?")
         - VALUE: 특정 수치 하나 ("전투력이 얼마야?")
-        - LIST: 특정 조건의 목록 ("각인 뭐 있어?")
 
         [후속 질문 처리]
         - 현재 질문이 닉네임만 바뀐 후속 질문이면("황로드유는?", "황로드유는 몇 개야?") 이전 대화의 주제(무엇을 묻고 있었는지)를 그대로 이어받아.
@@ -88,8 +79,6 @@ class AnalysisGenerator:
 
         return chain.invoke({
             "question": question,
-            "table_info": table_info,
-            "ui_table_map": UI_TABLE_MAP,
             "history": history_text or "없음",
             "candidates": candidates or [],
             })

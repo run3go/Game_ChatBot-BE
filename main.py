@@ -12,6 +12,7 @@ import json
 from database import get_db, SessionLocal
 from service.ai_service import AIService
 from service.nickname_service import load_nicknames, NICKNAME_SET
+from sql.schema_store import SCHEMA_STORE
 
 import os
 
@@ -36,6 +37,13 @@ async def lifespan(_: FastAPI):
         print(f"성공적으로 {length}개의 닉네임을 로드했습니다.")
     except Exception as e:
         print(f"닉네임 로드 중 오류 발생: {e}")
+
+    try:
+        count = SCHEMA_STORE.load(db)
+        print(f"성공적으로 {count}개의 테이블 스키마를 벡터스토어에 로드했습니다.")
+    except Exception as e:
+        print(f"스키마 벡터스토어 로드 중 오류 발생: {e}")
+        
     finally:
         db.close()
 

@@ -21,11 +21,7 @@ class SchemaBuilder:
 
         return {row.table_name: (row.table_comment or "") for row in rows}
 
-    def build(self, relevant_tables: list):
-
-        if not relevant_tables:
-            return {}
-
+    def build_all(self):
         rows = self.db.execute(text("""
             SELECT
                 t.table_name,
@@ -40,29 +36,23 @@ class SchemaBuilder:
                 ON t.table_name = c.table_name
                 AND t.table_schema = c.table_schema
             WHERE t.table_schema = 'lostark'
-            AND t.table_name IN :table_list  -- 파라미터 바인딩 추가
             ORDER BY t.table_name, c.ordinal_position
-        """), {"table_list": tuple(relevant_tables)})
+        """))
+        return self._rows_to_schema(rows)
 
+    def _rows_to_schema(self, rows) -> dict:
         schema = {}
-
         for row in rows:
             table = row.table_name
-            table_comment = row.table_comment or ""
-            column = row.column_name
-            column_comment = row.column_comment or ""
-
             if table not in schema:
                 schema[table] = {
-                    "comment": table_comment,
+                    "comment": row.table_comment or "",
                     "columns": []
                 }
-
             schema[table]["columns"].append({
-                "column": column,
-                "comment": column_comment
+                "column": row.column_name,
+                "comment": row.column_comment or ""
             })
-
         return schema
     
     

@@ -33,7 +33,6 @@ class SQLGenerator:
             - COUNT: 반드시 COUNT(*) 단일 값만 반환해. json_agg 사용 금지. AS 별칭은 무엇을 세는지 알 수 있도록 지정해. (예: 황로드유_겁화_count)
             - COUNT_LIST: GROUP BY + COUNT(*) 로 항목별 개수 목록을 반환해. json_agg 사용 금지. 각 COUNT 컬럼 AS 별칭도 동일하게 의미 있게 지정해.
             - VALUE: 단일 수치 컬럼 하나만 반환해.
-            - LIST: json_agg로 해당 항목 목록을 반환해.
             - COMPARE: 각 캐릭터별 서브쿼리로 비교 가능한 구조로 반환해.
             - DISPLAY: 화면 표시용 전체 데이터를 json_agg로 반환해.
 
@@ -86,28 +85,6 @@ class SQLGenerator:
             })
 
         return queries
-
-    def _detect_ui_type(self, question: str):
-
-        if "스킬" in question:
-            return "SKILL"
-
-        if "그리드" in question or "코어" in question:
-            return "ARK_GRID"
-        
-        if "패시브" in question:
-            return "ARK_PASSIVE"
-        
-        if "각인" in question:
-            return "ENGRAVING"
-
-        if "아바타" in question:
-            return "AVATAR"
-
-        if "내실" in question or "수집" in question:
-            return "COLLECTIBLE"
-
-        return "PROFILE"
     
     def _clean_sql(self, sql: str):
         return (
