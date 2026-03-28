@@ -8,7 +8,6 @@ from utils.text_parser import extract_nicknames
 
 CHARACTER_TYPES = set(UI_TABLE_MAP.keys())
 
-
 class AIService:
 
     def __init__(self, llm, db):
@@ -31,30 +30,25 @@ class AIService:
         if not candidates and len(nicknames) > 1:
             nicknames = nicknames[-1:]
 
-        if analysis.query_type == "GENERAL":
+        if analysis.category == "GENERAL":
             return self.answer_generator.answer_general(question, history)
 
-        if analysis.query_type in CHARACTER_TYPES:
+        if analysis.category in CHARACTER_TYPES:
             if not nicknames:
                 return self.answer_generator.answer_general(question, history)
 
-            query_type = analysis.query_type
-            tables = UI_TABLE_MAP.get(query_type, UI_TABLE_MAP["PROFILE"])
+            category = analysis.category
+            tables = UI_TABLE_MAP.get(category, UI_TABLE_MAP["PROFILE"])
 
             # 비교인데 캐릭터가 1명뿐이면 재질문
-            if len(nicknames) == 1 and analysis.aggregation_type == "COMPARE":
+            if len(nicknames) == 1 and analysis.response_format == "COMPARE":
                 return {
                     "ui_type": "FOLLOW_UP",
                     "message": f"**{nicknames[0]}** 말고 비교할 다른 캐릭터 닉네임을 알려주세요!",
-                    "pending": {"ui_type": query_type, "tables": tables},
+                    "pending": {"ui_type": category, "tables": tables},
                     "nicknames": analysis.nicknames,
                     "keywords": analysis.keywords,
                 }
-
-            # COUNT/VALUE/COMPARE → 전체 데이터 fetch 후 LLM 텍스트 답변
-            if analysis.aggregation_type not in ("DISPLAY"):
-                data = self._fetch_character_data(nicknames[0], tables)
-                return self.answer_generator.answer(question, [data] if data else [], history)
 
         result = self._handle_complex(question, nicknames, analysis, history)
         if isinstance(result, dict):
@@ -67,8 +61,8 @@ class AIService:
         schema = SCHEMA_STORE.get_schema(list(table_info.keys()))
 
         # CHARACTER 카테고리(DISPLAY/LIST)는 카테고리 테이블 전체를 schema에 보강
-        if analysis.query_type in CHARACTER_TYPES and analysis.aggregation_type == "DISPLAY":
-            required = UI_TABLE_MAP.get(analysis.query_type, [])
+        if analysis.category in CHARACTER_TYPES and analysis.response_format == "DISPLAY":
+            required = UI_TABLE_MAP.get(analysis.category, [])
             extra = SCHEMA_STORE.get_schema([t for t in required if t not in schema])
             schema.update(extra)
 

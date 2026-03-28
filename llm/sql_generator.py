@@ -28,7 +28,7 @@ class SQLGenerator:
             - 반드시 [스키마]에 명시된 테이블만 사용해. 그 외 테이블(예: characters, users, skills 등)은 절대 사용 금지.
             - 테이블에 접근할 때는 접두사로 lostark.를 사용해.
 
-            [aggregation_type별 SQL 규칙]
+            [response_format별 SQL 규칙]
             - COUNT: COUNT(*) 단일 값만 반환. json_agg 사용 금지. AS 별칭은 의미 있게 지정. (예: 황로드유_겁화_count)
             - COUNT_LIST: GROUP BY + COUNT(*) 로 항목별 개수 목록 반환. json_agg 사용 금지.
             - VALUE: 단일 수치 컬럼 하나만 반환.
@@ -37,13 +37,14 @@ class SQLGenerator:
               필터 조건이 있어도 반드시 서브쿼리 포맷을 유지하고, AS 별칭은 테이블 원본 이름을 그대로 사용해. (예: AS armory_skills_tb)
               SELECT
                 (SELECT COALESCE(json_agg(t.*), '[]'::json) FROM lostark.{{테이블A}} t WHERE t.character_name = '닉네임' [AND 추가필터]) AS {{테이블A}},
-                (SELECT COALESCE(json_agg(t.*), '[]'::json) FROM lostark.{{테이블B}} t WHERE t.character_name = '닉네임') AS {{테이블B}}
+                (SELECT COALESCE(json_agg(t.*), '[]'::json) FROM lostark.{{테이블B}} t WHERE t.character_name = '닉네임') AS {{테이블B}},
+                (SELECT COALESCE(json_agg(t.*), '[]'::json) FROM lostark.{{테이블C}} t WHERE t.character_name = '닉네임' AND t.weak_point >= 1) AS {{테이블C}}                                  
 
             [분석 규칙]
             - 여러 테이블의 통계(Count, Sum)와 리스트를 한 번에 가져올 때는 JOIN 대신 상호관련 서브쿼리를 사용해.
 
             [ui_type 결정 규칙]
-            - SQL이 캐릭터 테이블 전체 컬럼(t.* 또는 *)을 반환하면 → [분석]의 query_type 그대로 반환 (SKILL, ENGRAVING, ARK_GRID 등)
+            - SQL이 캐릭터 테이블 전체 컬럼(t.* 또는 *)을 반환하면 → [분석]의 category 그대로 반환 (SKILL, ENGRAVING, ARK_GRID 등)
             - SQL이 특정 컬럼만 반환하거나 COUNT·SUM 등 집계값이면 → TEXT
 
             [질문]
