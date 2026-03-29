@@ -1,5 +1,5 @@
-# 파이썬 3.9 환경 사용
-FROM python:3.9-slim
+# 파이썬 3.11 환경 사용
+FROM python:3.11-slim
 
 # 작업 폴더 지정
 WORKDIR /app
