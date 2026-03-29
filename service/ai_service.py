@@ -1,12 +1,12 @@
 from sqlalchemy import text
 
 from sql.schema_store import SCHEMA_STORE
-from llm.sql_generator import SQLGenerator, UI_TABLE_MAP
+from llm.sql_generator import SQLGenerator
 from llm.analysis_generator import AnalysisGenerator
 from llm.answer_generator import AnswerGenerator
-from utils.text_parser import extract_nicknames
-
-CHARACTER_TYPES = set(UI_TABLE_MAP.keys())
+from utils.chat_utils import extract_nicknames
+from service.populator import DataPopulator
+from constants import UI_TABLE_MAP, CHARACTER_TYPES
 
 class AIService:
 
@@ -15,40 +15,23 @@ class AIService:
         self.sql_generator = SQLGenerator(llm)
         self.analysis_generator = AnalysisGenerator(llm)
         self.answer_generator = AnswerGenerator(llm)
+        self.populator = DataPopulator(db)
 
-    def ask(self, question: str, pending: dict | None = None, history: list[dict] | None = None):
-        # 비교 재질문 처리
-        if pending:
-            nicknames = extract_nicknames(self.db, question)
-            target = nicknames[0] if nicknames else question.strip()
-            return self._fetch_display(target, pending["tables"], pending["ui_type"])
-
+    def ask(self, question: str, history: list[dict] | None = None):
         candidates = extract_nicknames(self.db, question)
         analysis = self.analysis_generator.analyze(question, history, candidates)
 
         nicknames = analysis.nicknames or candidates
+        # DB 검증 없이 llm이 추측해서 뽑은 닉네임이 여러 개인 경우
         if not candidates and len(nicknames) > 1:
+            # 신뢰도가 낮으므로 마지막 1개만 사용
             nicknames = nicknames[-1:]
 
         if analysis.category == "GENERAL":
             return self.answer_generator.answer_general(question, history)
 
-        if analysis.category in CHARACTER_TYPES:
-            if not nicknames:
-                return self.answer_generator.answer_general(question, history)
-
-            category = analysis.category
-            tables = UI_TABLE_MAP.get(category, UI_TABLE_MAP["PROFILE"])
-
-            # 비교인데 캐릭터가 1명뿐이면 재질문
-            if len(nicknames) == 1 and analysis.response_format == "COMPARE":
-                return {
-                    "ui_type": "FOLLOW_UP",
-                    "message": f"**{nicknames[0]}** 말고 비교할 다른 캐릭터 닉네임을 알려주세요!",
-                    "pending": {"ui_type": category, "tables": tables},
-                    "nicknames": analysis.nicknames,
-                    "keywords": analysis.keywords,
-                }
+        if analysis.category in CHARACTER_TYPES and not nicknames:
+            return ["어떤 캐릭터에 대해 알고 싶으신가요? 닉네임을 알려주세요!"]
 
         result = self._handle_complex(question, nicknames, analysis, history)
         if isinstance(result, dict):
@@ -57,53 +40,61 @@ class AIService:
         return result
 
     def _handle_complex(self, question: str, nicknames: list, analysis, history: list[dict]):
-        table_info = SCHEMA_STORE.search(analysis.keywords)
-        schema = SCHEMA_STORE.get_schema(list(table_info.keys()))
+        tables = SCHEMA_STORE.search(analysis.keywords)
+        schema = SCHEMA_STORE.get_schema(tables)
 
-        # CHARACTER 카테고리(DISPLAY/LIST)는 카테고리 테이블 전체를 schema에 보강
+        # CHARACTER 카테고리(DISPLAY)는 카테고리 테이블 전체를 schema에 보강
         if analysis.category in CHARACTER_TYPES and analysis.response_format == "DISPLAY":
             required = UI_TABLE_MAP.get(analysis.category, [])
             extra = SCHEMA_STORE.get_schema([t for t in required if t not in schema])
             schema.update(extra)
 
-        # 캐릭터 데이터가 필요한데 닉네임이 없으면 재질문
-        needs_character = any(
-            col["column"] == "character_name"
-            for t in schema.values()
-            for col in t.get("columns", [])
-        )
-        if not nicknames and needs_character:
-            return {"ui_type": "FOLLOW_UP", "message": "어떤 캐릭터에 대해 알고 싶으신가요? 닉네임을 알려주세요!", "pending": None}
-
         sql, ui_type = self.sql_generator.generate(question, analysis, schema, nicknames)
 
-        # 할루시네이션 방지
-        used = {w.split(".")[-1] for w in sql.split() if "lostark." in w}
-        if used - set(schema.keys()):
-            raise ValueError(f"LLM이 허용되지 않은 테이블을 사용했습니다: {used - set(schema.keys())}")
+        # 할루시네이션 방지: 허용되지 않은 테이블 사용 시 에러 피드백과 함께 1회 재시도
+        for attempt in range(2):
+            used = {w.split(".")[-1] for w in sql.split() if "lostark." in w}
+            invalid = used - set(schema.keys())
+            if not invalid:
+                break
+            if attempt == 1:
+                raise ValueError(f"LLM이 허용되지 않은 테이블을 사용했습니다: {invalid}")
+            
+            sql, ui_type = self.sql_generator.generate(question, analysis, schema, nicknames, error=f"허용되지 않은 테이블 사용: {invalid}. 반드시 [스키마]에 있는 테이블만 사용해.")
 
-        # DISPLAY/LIST 카테고리: LLM SQL 결과 사용, 누락 테이블은 보충
-        if ui_type != "TEXT" and nicknames and ui_type in UI_TABLE_MAP:
+        if ui_type != "TEXT" and ui_type in UI_TABLE_MAP:
             row = self.db.execute(text(sql)).mappings().fetchone()
             data = dict(row) if row else {}
 
-            # SQL 필터 조건에 맞는 결과가 없으면 텍스트 답변으로 처리 (보충 전에 확인)
+            # LLM이 잘못된 별칭을 쓸 시 보정
+            unknown_keys = [k for k in data if k not in schema]
+            unmatched_tables = [t for t in used if t not in data]
+            if len(unknown_keys) == len(unmatched_tables) == 1:
+                data[unmatched_tables[0]] = data.pop(unknown_keys[0])
+
+            # SQL 필터 조건에 맞는 결과가 없으면 텍스트 답변으로 처리
             if data and all(isinstance(v, list) and len(v) == 0 for v in data.values()):
                 return self.answer_generator.answer(question, [], history)
 
             missing = [t for t in UI_TABLE_MAP[ui_type] if t not in data]
             if missing:
-                data.update(self._fetch_character_data(nicknames[0], missing))
+                data.update(self._fetch_missing_tables(nicknames[0], missing))
+
+            data = self.populator.populate(ui_type, data)
 
             return {"ui_type": ui_type, "data": data, "nickname": nicknames[0]}
 
         result = self.db.execute(text(sql)).mappings().all()
         return self.answer_generator.answer(question, result, history)
-
-    def _fetch_character_data(self, nickname: str, tables: list) -> dict:
-        queries = self.sql_generator.generate_character_json([nickname], tables)
-        row = self.db.execute(text(queries[0]["sql"])).mappings().fetchone()
+ 
+    # 누락 테이블 fetch
+    def _fetch_missing_tables(self, nickname: str, tables: list) -> dict:
+        subqueries = ",\n".join(
+            f"  (SELECT COALESCE(json_agg(t.*), '[]'::json) FROM lostark.{table} t "
+            f"WHERE t.character_name = '{nickname}' AND t.collected_at = "
+            f"(SELECT MAX(t2.collected_at) FROM lostark.{table} t2 WHERE t2.character_name = '{nickname}')) AS {table}"
+            for table in tables
+        )
+        row = self.db.execute(text(f"SELECT\n{subqueries}")).mappings().fetchone()
         return dict(row) if row else {}
 
-    def _fetch_display(self, nickname: str, tables: list, ui_type: str) -> dict:
-        return {"ui_type": ui_type, "data": self._fetch_character_data(nickname, tables), "nickname": nickname}

@@ -1,6 +1,7 @@
 from langchain_core.prompts import ChatPromptTemplate
 from output_types import QuestionAnalysis
 from sql.game_knowledge import SLANG_RULES
+from utils.chat_utils import format_history
 
 class AnalysisGenerator:
     def __init__(self, llm):
@@ -50,7 +51,6 @@ class AnalysisGenerator:
         - keywords: 닉네임을 제외한 질문의 핵심 개념들을 정식 명칭으로 분리해서 추출. 은어·약어가 있으면 위 규칙으로 확장. 질문에 없는 정보는 추가하지 말 것.
           각 개념은 SQL 조건 힌트가 될 수 있도록 구체적으로 작성.
           예) "9겁 개수" → ["9레벨 겁화의 보석", "보석 개수"]
-          예) "파괴 스킬" → ["부위 파괴 수치(weak_point)가 1 이상인 스킬", "스킬 목록"]
           예) "9겁 달린 스킬" → ["9레벨 겁화의 보석", "보석이 적용된 스킬"]
           TRADING이면 keywords에 아이템 정식 명칭을 포함할 것.
 
@@ -77,20 +77,7 @@ class AnalysisGenerator:
         structured_llm = self.llm.with_structured_output(QuestionAnalysis)
         chain = prompt | structured_llm
 
-        history_text = ""
-        if history:
-            lines = []
-            for m in history[-6:]:
-                if m['role'] == 'user':
-                    line = f"사용자: {m['content']}"
-                    if m.get('nicknames'):
-                        line += f" [닉네임: {', '.join(m['nicknames'])}]"
-                    if m.get('keywords'):
-                        line += f" [키워드: {', '.join(m['keywords'])}]"
-                    lines.append(line)
-                else:
-                    lines.append(f"AI: {m['content']}")
-            history_text = "\n".join(lines)
+        history_text = format_history(history) if history else ""
 
         return chain.invoke({
             "question": question,

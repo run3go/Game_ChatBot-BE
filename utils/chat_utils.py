@@ -1,8 +1,6 @@
 import re
 from service.nickname_service import validate_nickname
-
-POSTPOSITIONS = ["은", "는", "이", "가", "을", "를", "의", "와", "과", "랑", "이랑"]
-STOPWORDS = ["스킬", "보석", "각인", "아바타", "장비", "내실", "능력치", "아크패시브", "아크그리드"]
+from constants import POSTPOSITIONS, STOPWORDS
 
 def clean_word(word: str) -> str:
     for _ in range(3):
@@ -17,6 +15,20 @@ def clean_word(word: str) -> str:
         if not changed:
             break
     return word
+
+def format_history(history: list[dict], limit: int = 6) -> str:
+    lines = []
+    for m in history[-limit:]:
+        if m['role'] == 'user':
+            line = f"사용자: {m['content']}"
+            if m.get('nicknames'):
+                line += f" [닉네임: {', '.join(m['nicknames'])}]"
+            if m.get('keywords'):
+                line += f" [키워드: {', '.join(m['keywords'])}]"
+        else:
+            line = f"AI: {m['content']}"
+        lines.append(line)
+    return "\n".join(lines)
 
 def extract_nicknames(db, question: str) -> list[str]:
 

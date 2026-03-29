@@ -1,6 +1,5 @@
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, Body
 from fastapi.responses import StreamingResponse
-from fastapi import Body
 from sqlalchemy.orm import Session
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
@@ -8,13 +7,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from typing import Optional
 import json
+import os
 
 from database import get_db, SessionLocal
 from service.ai_service import AIService
-from service.nickname_service import load_nicknames, NICKNAME_SET
+from service.nickname_service import load_nicknames
 from sql.schema_store import SCHEMA_STORE
-
-import os
 
 load_dotenv()
 
@@ -65,11 +63,10 @@ app.add_middleware(
 def ask_ai_stream(
     question: str = Body(...),
     history: Optional[list[dict]] = Body(default=None),
-    pending: Optional[dict] = Body(default=None),
     db: Session = Depends(get_db),
 ):
     service = AIService(llm, db)
-    result = service.ask(question, pending, history)
+    result = service.ask(question, history)
 
     def generate():
         if isinstance(result, dict):

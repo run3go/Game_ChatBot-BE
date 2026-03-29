@@ -1,5 +1,6 @@
 import json
 from langchain_core.prompts import ChatPromptTemplate
+from utils.chat_utils import format_history
 
 class AnswerGenerator:
 
@@ -19,13 +20,7 @@ class AnswerGenerator:
             [질문]
             {question}
         """)
-        history_text = ""
-        if history:
-            lines = [
-                f"{'사용자' if m['role'] == 'user' else 'AI'}: {m['content']}"
-                for m in history[-6:]
-            ]
-            history_text = "\n".join(lines)
+        history_text = format_history(history, limit=10) if history else ""
 
         chain = prompt | self.llm
         for chunk in chain.stream({"question": question, "history": history_text or "없음"}):
@@ -69,13 +64,7 @@ class AnswerGenerator:
             {data}
         """)
 
-        history_text = ""
-        if history:
-            lines = [
-                f"{'사용자' if m['role'] == 'user' else 'AI'}: {m['content']}"
-                for m in history[-6:]
-            ]
-            history_text = "\n".join(lines)
+        history_text = format_history(history, limit=10) if history else ""
 
         chain = prompt | self.llm
 

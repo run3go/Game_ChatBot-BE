@@ -5,8 +5,6 @@ from langchain_core.documents import Document
 from sqlalchemy.orm import Session
 
 from sql.schema_builder import SchemaBuilder
-# from sql.game_knowledge import GAME_KNOWLEDGE_DOCS
-
 
 class SchemaVectorStore:
 
@@ -28,23 +26,22 @@ class SchemaVectorStore:
 
         docs = []
         for table, comment in self._summary.items():
-            docs.append(Document(page_content=f"{table}: {comment}", metadata={"table": table}))
+            docs.append(Document(page_content=comment, metadata={"table": table}))
         for table, schema in self._detail.items():
             for col in schema["columns"]:
                 if col["comment"]:
                     docs.append(Document(page_content=col["comment"], metadata={"table": table}))
-        # docs.extend(GAME_KNOWLEDGE_DOCS)
 
         self._store = InMemoryVectorStore.from_documents(docs, embeddings)
         return len(docs)
 
-    def search(self, keywords: list[str], threshold: float = 0.45) -> dict:
+    def search(self, keywords: list[str], threshold: float = 0.45) -> list:
         if not self._store:
-            return self._summary
+            return list(self._summary.keys())
         seen = set()
         tables = []
         for keyword in keywords:
-            results = self._store.similarity_search_with_score(keyword, k=30)
+            results = self._store.similarity_search_with_score(keyword, k=10)
             added = 0
             for doc, score in results:
                 t = doc.metadata["table"]
@@ -55,7 +52,7 @@ class SchemaVectorStore:
                         added += 1
                     else:
                         break
-        return {t: self._summary[t] for t in tables}
+        return tables
 
     def get_schema(self, tables: list) -> dict:
         return {t: self._detail[t] for t in tables if t in self._detail}
