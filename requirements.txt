@@ -3,3 +3,4 @@ uvicorn
 langchain_openai
 python-dotenv
 sqlalchemy
+psycopg2-binary
