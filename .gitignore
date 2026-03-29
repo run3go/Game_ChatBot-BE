@@ -21,7 +21,6 @@ kind.exe
 
 fastapi.yaml
 postgres.yaml
-Dockerfile
 fastapi.tar
 kind.exe
 

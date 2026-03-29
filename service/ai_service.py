@@ -74,7 +74,6 @@ class AIService:
 
             # SQL 필터 조건에 맞는 결과가 없으면 텍스트 답변으로 처리
             if data and all(isinstance(v, list) and len(v) == 0 for v in data.values()):
-                print(1)
                 return self.answer_generator.answer(question, [], history)
 
             missing = [t for t in UI_TABLE_MAP[ui_type] if t not in data]
