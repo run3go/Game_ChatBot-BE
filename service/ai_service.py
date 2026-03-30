@@ -60,7 +60,7 @@ class AIService:
             schema.update(extra)
 
         sql, ui_type = self.sql_generator.generate(question, analysis, schema, nicknames)
-
+        
         # 할루시네이션 방지: 허용되지 않은 테이블 사용 시 에러 피드백과 함께 1회 재시도
         for attempt in range(2):
             used = {w.split(".")[-1] for w in sql.split() if "lostark." in w}

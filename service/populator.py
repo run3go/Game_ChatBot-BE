@@ -32,3 +32,4 @@ class DataPopulator:
             for s in skills
         ]
         return data
+

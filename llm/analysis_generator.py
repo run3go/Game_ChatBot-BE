@@ -1,7 +1,7 @@
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.exceptions import OutputParserException
 from output_types import QuestionAnalysis
-from sql.game_knowledge import SLANG_RULES
+from game_knowledge import SLANG_RULES
 from utils.chat_utils import format_history
 
 class AnalysisGenerator:
@@ -13,12 +13,12 @@ class AnalysisGenerator:
         prompt = ChatPromptTemplate.from_template("""
         너는 로스트아크 질문 분석기야.
 
-        [QUERY_TYPE]
+        [CATEGORY_TYPE]
         캐릭터 카테고리 조회 (닉네임 필요):
         - SKILL: 스킬, 보석
         - ENGRAVING: 각인
         - AVATAR: 아바타
-        - ARK_GRID: 아크그리드
+        - ARK_GRID: 아크그리드 전체, 코어 중심 질문 ("아크그리드 보여줘", "고대 코어", "질서 코어")
         - ARK_PASSIVE: 아크패시브
         - COLLECTIBLE: 수집품, 내실
         - PROFILE: 프로필, 레벨, 능력치, 장비
@@ -63,7 +63,7 @@ class AnalysisGenerator:
         - VALUE: 특정 수치 하나 ("전투력이 얼마야?")
 
         [후속 질문 처리]
-        - 현재 질문이 닉네임만 바뀐 후속 질문이면("황로드유는?", "황로드유는 몇 개야?") 이전 대화의 주제를 그대로 이어받아.D이 프롬프트
+        - 현재 질문이 닉네임만 바뀐 후속 질문이면("황로드유는?", "황로드유는 몇 개야?") 이전 대화의 주제를 그대로 이어받아.
         - 예시: 이전 대화가 "작열 몇 개야?" → AI "3개야" 흐름이었다면, "황로드유는 몇 개야?"는 "황로드유의 작열 개수"로 해석해.
         - 질문을 해석할 때 이전 대화 맥락 전체를 참고해서 생략된 주제를 복원해.
 

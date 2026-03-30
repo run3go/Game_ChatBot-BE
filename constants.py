@@ -1,6 +1,6 @@
 UI_TABLE_MAP = {
     "SKILL": ["armory_skills_tb", "armory_gem_tb"],
-    "ARK_GRID": ["ark_grid_cores_tb", "ark_grid_effects_tb", "ark_grid_gems_tb"],
+    "ARK_GRID": ["ark_grid_cores_tb", "ark_grid_gems_tb"],
     "ARK_PASSIVE": ["ark_passive_effects_tb", "ark_passive_points_tb"],
     "ENGRAVING": ["armory_engravings_tb"],
     "AVATAR": ["armory_avatars_tb", "armory_profile_tb"],
