@@ -66,16 +66,26 @@ def ask_ai_stream(
     db: Session = Depends(get_db),
 ):
     service = AIService(llm, db)
-    result = service.ask(question, history)
 
     def generate():
-        if isinstance(result, dict):
-            yield f"data: {json.dumps({'type': 'structured', 'payload': result})}\n\n"
-        else:
-            for chunk in result:
-                if chunk:
-                    yield f"data: {json.dumps({'type': 'text', 'content': chunk})}\n\n"
-        yield "data: [DONE]\n\n"
+        try:
+            result = service.ask(question, history)
+        except Exception:
+            yield f"data: {json.dumps({'type': 'error', 'content': '잠시 후 다시 시도해 주세요.'})}\n\n"
+            yield "data: [DONE]\n\n"
+            return
+
+        try:
+            if isinstance(result, dict):
+                yield f"data: {json.dumps({'type': 'structured', 'payload': result})}\n\n"
+            else:
+                for chunk in result:
+                    if chunk:
+                        yield f"data: {json.dumps({'type': 'text', 'content': chunk})}\n\n"
+        except Exception:
+            yield f"data: {json.dumps({'type': 'error', 'content': '잠시 후 다시 시도해 주세요.'})}\n\n"
+        finally:
+            yield "data: [DONE]\n\n"
 
     return StreamingResponse(
         generate(),

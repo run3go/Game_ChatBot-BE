@@ -1,12 +1,13 @@
 from langchain_core.prompts import ChatPromptTemplate
-from output_types import SQLWithUIType
+from langchain_core.exceptions import OutputParserException
+from output_types import SQLWithUIType, QuestionAnalysis
 
 class SQLGenerator:
 
     def __init__(self, llm):
         self.llm = llm
 
-    def generate(self, question: str, analysis, schema, nicknames: list[str] | None = None, error: str | None = None):
+    def generate(self, question: str, analysis : QuestionAnalysis, schema, nicknames: list[str] | None = None, error: str | None = None):
         prompt = ChatPromptTemplate.from_template("""
             너는 로스트아크 DB 전문가야.
 
@@ -57,18 +58,20 @@ class SQLGenerator:
         """)
 
         structured_llm = self.llm.with_structured_output(SQLWithUIType)
-        chain = prompt | structured_llm
+        chain = (prompt | structured_llm).with_retry(stop_after_attempt=2)
+
 
         result = chain.invoke({
-            "question": question,
-            "analysis": analysis,
-            "nicknames": nicknames if nicknames else "",
-            "schema": schema,
-            "error_feedback": f"[이전 시도 오류 - 반드시 수정]\n{error}\n위 오류를 반드시 수정해서 다시 생성해." if error else "",
+                "question": question,
+                "analysis": analysis,
+                "nicknames": nicknames if nicknames else "",
+                "schema": schema,
+                "error_feedback": f"[이전 시도 오류 - 반드시 수정]\n{error}\n위 오류를 반드시 수정해서 다시 생성해." if error else "",
         })
 
+        if result is None:
+            raise ValueError("SQL 생성 결과가 없습니다.")
         return self._clean_sql(result.sql), result.ui_type
-    
 
     def _clean_sql(self, sql: str):
         return (

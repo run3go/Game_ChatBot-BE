@@ -22,9 +22,12 @@ class AnswerGenerator:
         """)
         history_text = format_history(history, limit=10) if history else ""
 
-        chain = prompt | self.llm
-        for chunk in chain.stream({"question": question, "history": history_text or "없음"}):
-            yield chunk.content
+        chain = (prompt | self.llm).with_retry(stop_after_attempt=2)
+        try:
+            for chunk in chain.stream({"question": question, "history": history_text or "없음"}):
+                yield chunk.content
+        except Exception:
+            yield "잠시 후 다시 시도해 주세요."
 
     def answer(self, question: str, data, history: list[dict] | None = None):
         data = [dict(row) for row in data]
@@ -66,11 +69,15 @@ class AnswerGenerator:
 
         history_text = format_history(history, limit=10) if history else ""
 
-        chain = prompt | self.llm
+        chain = (prompt | self.llm).with_retry(stop_after_attempt=2)
 
-        for chunk in chain.stream({
-            "question": question,
-            "data": json.dumps(data, ensure_ascii=False, default=float),
-            "history": history_text or "없음",
-        }):
-            yield chunk.content
+        try:
+            for chunk in chain.stream({
+                "question": question,
+                "data": json.dumps(data, ensure_ascii=False, default=float),
+                "history": history_text or "없음",
+            }):
+                yield chunk.content
+        
+        except Exception:
+            yield "잠시 후 다시 시도해 주세요."

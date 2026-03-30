@@ -1,4 +1,5 @@
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.exceptions import OutputParserException
 from output_types import QuestionAnalysis
 from sql.game_knowledge import SLANG_RULES
 from utils.chat_utils import format_history
@@ -75,13 +76,17 @@ class AnalysisGenerator:
         """)
 
         structured_llm = self.llm.with_structured_output(QuestionAnalysis)
-        chain = prompt | structured_llm
+        chain = (prompt | structured_llm).with_retry(stop_after_attempt=2)
 
         history_text = format_history(history) if history else ""
 
-        return chain.invoke({
+        result = chain.invoke({
             "question": question,
             "history": history_text or "없음",
             "candidates": candidates or [],
             "slang_rules": SLANG_RULES,
             })
+        
+        if result is None:
+            raise ValueError("질문 분석 결과가 없습니다.")
+        return result
