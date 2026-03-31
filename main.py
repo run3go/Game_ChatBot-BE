@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, Body
+from fastapi import FastAPI, Depends, Body, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from dotenv import load_dotenv
@@ -11,10 +11,14 @@ import os
 
 from database import get_db, SessionLocal
 from service.ai_service import AIService
+from service.airflow_service import AirflowManager, CharacterRequest
 from service.nickname_service import load_nicknames
 from sql.schema_store import SCHEMA_STORE
 
 load_dotenv()
+
+airflow = AirflowManager()
+
 
 llm = ChatOpenAI(
   model="openai/gpt-4o", 
@@ -68,18 +72,26 @@ def ask_ai_stream(
     service = AIService(llm, db)
 
     def generate():
+        result = None
         try:
-            result = service.ask(question, history)
+            for event_type, event_data in service.ask(question, history):
+                if event_type == "status":
+                    yield f"data: {json.dumps({'type': 'status', 'content': event_data})}\n\n"
+                else:
+                    result = event_data
         except Exception:
             yield f"data: {json.dumps({'type': 'error', 'content': '잠시 후 다시 시도해 주세요.'})}\n\n"
             yield "data: [DONE]\n\n"
             return
 
         try:
-            if isinstance(result, dict):
+            if isinstance(result, dict) and result.get("ui_type") == "CONFIRM_COLLECT":
+                yield f"data: {json.dumps({'type': 'text', 'content': result['message']})}\n\n"
+                yield f"data: {json.dumps({'type': 'confirm_collect', 'nickname': result['nickname']})}\n\n"
+            elif isinstance(result, dict):
                 yield f"data: {json.dumps({'type': 'structured', 'payload': result})}\n\n"
             else:
-                for chunk in result:
+                for chunk in result or []:
                     if chunk:
                         yield f"data: {json.dumps({'type': 'text', 'content': chunk})}\n\n"
         except Exception:
@@ -92,3 +104,20 @@ def ask_ai_stream(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+@app.post("/trigger-update")
+def update_character_data(req: CharacterRequest):
+    try:
+        # 백엔드 로직 실행
+        result = airflow.trigger_dag(
+            dag_id="chatbot_response_processor",
+            conf={"character_name": req.character_name, "request_source": "fastapi"},
+        )
+
+        if result.status_code in [200, 201, 202]:
+            return {"status": "success", "run_id": result.json().get("dag_run_id")}
+        else:
+            raise HTTPException(status_code=result.status_code, detail=result.text)
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

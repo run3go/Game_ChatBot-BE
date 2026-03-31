@@ -20,10 +20,13 @@ class AIService:
 
     def ask(self, question: str, history: list[dict] | None = None):
         candidates = extract_nicknames(self.db, question)
+
+        yield "status", "질문을 분석하는 중이에요..."
         try:
             analysis = self.analysis_generator.analyze(question, history, candidates)
         except Exception:
-            return ["잠시 후 다시 시도해 주세요."]
+            yield "result", ["잠시 후 다시 시도해 주세요."]
+            return
 
         nicknames = analysis.nicknames or candidates
         # DB 검증 없이 llm이 추측해서 뽑은 닉네임이 여러 개인 경우
@@ -32,22 +35,38 @@ class AIService:
             nicknames = nicknames[-1:]
 
         if analysis.category == "GENERAL":
-            return self.answer_generator.answer_general(question, history)
+            yield "status", "답변을 생성하는 중이에요..."
+            yield "result", self.answer_generator.answer_general(question, history)
+            return
 
         if analysis.category in CHARACTER_TYPES and not nicknames:
-            return ["어떤 캐릭터에 대해 알고 싶으신가요? 닉네임을 알려주세요!"]
+            yield "result", ["어떤 캐릭터에 대해 알고 싶으신가요? 닉네임을 알려주세요!"]
+            return
 
+        # 캐릭터 카테고리인데 DB에 없는 경우
+        if analysis.category in CHARACTER_TYPES and nicknames and not candidates:
+            nickname = nicknames[0]
+            yield "result", {
+                "ui_type": "CONFIRM_COLLECT",
+                "nickname": nickname,
+                "message": f"'{nickname}' 캐릭터 정보가 존재하지 않습니다. 데이터를 수집할까요? (예/아니오)",
+            }
+            return
+
+        yield "status", "데이터를 조회하는 중이에요..."
         try:
             result = self._handle_complex(question, nicknames, analysis, history)
         except ValueError:
-            return ["질문을 좀 더 구체적으로 해주시면 더 잘 답변드릴 수 있어요."]
+            yield "result", ["질문을 좀 더 구체적으로 해주시면 더 잘 답변드릴 수 있어요."]
+            return
         except Exception:
-            return ["잠시 후 다시 시도해 주세요."]
+            yield "result", ["잠시 후 다시 시도해 주세요."]
+            return
 
         if isinstance(result, dict):
             result['nicknames'] = analysis.nicknames
             result['keywords'] = analysis.keywords
-        return result
+        yield "result", result
 
     def _handle_complex(self, question: str, nicknames: list, analysis : QuestionAnalysis, history: list[dict]):
         tables = SCHEMA_STORE.search(analysis.keywords)
