@@ -19,7 +19,7 @@ class AnalysisGenerator:
         - ENGRAVING: 각인
         - AVATAR: 아바타
         - ARK_GRID: 아크그리드 전체, 코어 중심 질문 ("아크그리드 보여줘", "고대 코어", "질서 코어")
-        - ARK_PASSIVE: 아크패시브
+        - ARK_PASSIVE: 아크패시브, 진화, 깨달음, 도약
         - COLLECTIBLE: 수집품, 내실
         - PROFILE: 프로필, 레벨, 능력치, 장비
         - TOTAL_INFO: 특정 카테고리 없이 닉네임만 있거나 포괄적 정보 요청

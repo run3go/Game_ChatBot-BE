@@ -1,4 +1,5 @@
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
 class DataPopulator:
 
@@ -32,4 +33,53 @@ class DataPopulator:
             for s in skills
         ]
         return data
+
+    def _populate_ark_passive(self, data: dict) -> dict:
+        effects = data.get("ark_passive_effects_tb", [])
+        names = list({e["effect_name"] for e in effects if e.get("effect_name")})
+        if not names:
+            return data
+
+        rows = self.db.execute(
+            text("""
+                SELECT passive_name, tier, req_points, max_level,
+                       lv1_effect, lv2_effect, lv3_effect, lv4_effect, lv5_effect,
+                       lv10_effect, lv20_effect, lv30_effect
+                FROM lostark.ark_passive
+                WHERE passive_name = ANY(:names)
+            """),
+            {"names": names}
+        ).mappings().all()
+
+        meta_map = {r["passive_name"]: dict(r) for r in rows}
+
+        enriched = []
+        for e in effects:
+            meta = meta_map.get(e["effect_name"], {})
+            level = e.get("level")
+            level_effect = None
+            if level is not None:
+                level_effect = meta.get(f"lv{level}_effect")
+            enriched.append({
+                **e,
+                "req_points": meta.get("req_points"),
+                "max_level": meta.get("max_level"),
+                "level_effect": level_effect,
+            })
+
+        data["ark_passive_effects_tb"] = enriched
+        return data
+
+    def fetch_missing_tables(self, nickname: str, tables: list) -> dict:
+        subqueries = ",\n".join(
+            f"  (SELECT COALESCE(json_agg(t.*), '[]'::json) FROM lostark.{table} t "
+            f"WHERE t.character_name = :nickname AND t.collected_at = "
+            f"(SELECT MAX(t2.collected_at) FROM lostark.{table} t2 WHERE t2.character_name = :nickname)) AS {table}"
+            for table in tables
+        )
+        try:
+            row = self.db.execute(text(f"SELECT\n{subqueries}"), {"nickname": nickname}).mappings().fetchone()
+            return dict(row) if row else {}
+        except SQLAlchemyError:
+            return {}
 

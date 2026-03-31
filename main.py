@@ -7,7 +7,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from typing import Optional
 import json
+import logging
 import os
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
 
 from database import get_db, SessionLocal
 from service.ai_service import AIService
@@ -108,7 +114,6 @@ def ask_ai_stream(
 @app.post("/trigger-update")
 def update_character_data(req: CharacterRequest):
     try:
-        # 백엔드 로직 실행
         result = airflow.trigger_dag(
             dag_id="chatbot_response_processor",
             conf={"character_name": req.character_name, "request_source": "fastapi"},
@@ -119,5 +124,13 @@ def update_character_data(req: CharacterRequest):
         else:
             raise HTTPException(status_code=result.status_code, detail=result.text)
 
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/dag-status/{run_id}")
+def get_dag_status(run_id: str):
+    try:
+        status = airflow.get_dag_run_status("chatbot_response_processor", run_id)
+        return {"status": status}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

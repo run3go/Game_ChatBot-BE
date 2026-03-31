@@ -73,6 +73,18 @@ class SQLGenerator:
             raise ValueError("SQL 생성 결과가 없습니다.")
         return self._clean_sql(result.sql), result.ui_type
 
+    def generate_validated(self, question: str, analysis: QuestionAnalysis, schema: dict, nicknames: list[str] | None = None) -> tuple[str, str, set]:
+        sql, ui_type = self.generate(question, analysis, schema, nicknames)
+        for attempt in range(2):
+            used = {w.split(".")[-1] for w in sql.split() if "lostark." in w}
+            invalid = used - set(schema.keys())
+            if not invalid:
+                return sql, ui_type, used
+            if attempt == 1:
+                raise ValueError(f"LLM이 허용되지 않은 테이블을 사용했습니다: {invalid}")
+            sql, ui_type = self.generate(question, analysis, schema, nicknames, error=f"허용되지 않은 테이블 사용: {invalid}. 반드시 [스키마]에 있는 테이블만 사용해.")
+        return sql, ui_type, used
+
     def _clean_sql(self, sql: str):
         return (
             sql

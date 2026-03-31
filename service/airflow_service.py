@@ -57,3 +57,13 @@ class AirflowManager:
             return self.trigger_dag(dag_id, conf, _retry=False)
 
         return response
+
+    def get_dag_run_status(self, dag_id: str, dag_run_id: str) -> str:
+        token = self.get_token()
+        headers = {"Authorization": f"Bearer {token}"}
+        response = requests.get(
+            f"{self.base_url}/api/v2/dags/{dag_id}/dagRuns/{dag_run_id}",
+            headers=headers,
+        )
+        response.raise_for_status()
+        return response.json().get("state", "unknown")

@@ -32,7 +32,7 @@ def format_history(history: list[dict], limit: int = 6) -> str:
 
 def extract_nicknames(db, question: str) -> list[str]:
 
-    words = re.findall(r"[가-힣A-Za-z0-9]{2,12}", question)
+    words = re.findall(r"[가-힣A-Za-z]{2,12}", question)
 
     nicknames = []
     seen = set()
