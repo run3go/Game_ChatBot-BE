@@ -6,6 +6,7 @@ from sql.schema_store import SCHEMA_STORE
 from llm.sql_generator import SQLGenerator
 from llm.analysis_generator import AnalysisGenerator
 from llm.answer_generator import AnswerGenerator
+from llm.few_shot_retriever import FEW_SHOT_STORE
 from utils.chat_utils import extract_nicknames
 from service.nickname_service import validate_nicknames_batch
 from service.populator import DataPopulator
@@ -68,7 +69,17 @@ class AIService:
         if isinstance(result, dict):
             result['nicknames'] = analysis.nicknames
             result['keywords'] = analysis.keywords
-        yield "result", result
+            yield "result", result
+            if result.get("ui_type") != "TOTAL_INFO":
+                yield "status", "답변을 생성하는 중이에요..."
+                yield "result_text", self.answer_generator.answer_display(
+                    question,
+                    result.get("ui_type", ""),
+                    result.get("data", {}),
+                    history,
+                )
+        else:
+            yield "result", result
 
     def _resolve_nicknames(self, candidates: list, llm_nicknames: list | None) -> tuple[list, list]:
         if candidates:
@@ -78,39 +89,24 @@ class AIService:
         return [], []
 
     def _handle_complex(self, question: str, nicknames: list, analysis: QuestionAnalysis, history: list[dict]):
+        if analysis.category == "TOTAL_INFO" and nicknames:
+            data = self.populator.fetch_missing_tables(nicknames[0], UI_TABLE_MAP["TOTAL_INFO"])
+            data = self.populator.populate("TOTAL_INFO", data)
+            return {"ui_type": "TOTAL_INFO", "data": data}
+
         tables = SCHEMA_STORE.search(analysis.keywords)
         schema = SCHEMA_STORE.get_schema(tables)
 
         if analysis.category in CHARACTER_TYPES and analysis.response_format == "DISPLAY":
-            required = UI_TABLE_MAP.get(analysis.category, [])
-            extra = SCHEMA_STORE.get_schema([t for t in required if t not in schema])
-            schema.update(extra)
+            if nicknames:
+                tables = UI_TABLE_MAP.get(analysis.category, [])
+                data = self.populator.fetch_missing_tables(nicknames[0], tables)
+                data = self.populator.populate(analysis.category, data)
+                return {"ui_type": analysis.category, "data": data}
 
-        sql, ui_type, used = self.sql_generator.generate_validated(question, analysis, schema, nicknames)
-
-        if ui_type != "TEXT" and ui_type in UI_TABLE_MAP:
-            if not nicknames:
-                result = self._execute_sql(sql, False, question, analysis, schema, nicknames)
-                return self.answer_generator.answer(question, result or [], history)
-
-            row = self._execute_sql(sql, True, question, analysis, schema, nicknames)
-            data = dict(row) if row else {}
-
-            # LLM이 잘못된 별칭을 쓸 시 보정
-            unknown_keys = [k for k in data if k not in schema]
-            unmatched_tables = [t for t in used if t not in data]
-            if len(unknown_keys) == len(unmatched_tables) == 1:
-                data[unmatched_tables[0]] = data.pop(unknown_keys[0])
-
-            if data and all(isinstance(v, list) and len(v) == 0 for v in data.values()):
-                return self.answer_generator.answer(question, [], history)
-
-            missing = [t for t in UI_TABLE_MAP[ui_type] if t not in data]
-            if missing:
-                data.update(self.populator.fetch_missing_tables(nicknames[0], missing))
-
-            data = self.populator.populate(ui_type, data)
-            return {"ui_type": ui_type, "data": data}
+        few_shots = FEW_SHOT_STORE.retrieve(self.db, question)
+        all_tables = set(SCHEMA_STORE.get_all().keys())
+        sql, ui_type, used = self.sql_generator.generate_validated(question, analysis, schema, nicknames, few_shots=few_shots, all_tables=all_tables)
 
         result = self._execute_sql(sql, False, question, analysis, schema, nicknames)
         if result is None:
@@ -123,6 +119,7 @@ class AIService:
                 result = self.db.execute(text(sql))
                 return result.mappings().fetchone() if fetch_one else result.mappings().all()
             except ProgrammingError as e:
+                self.db.rollback()
                 if attempt == 1:
                     return None
                 sql, _ = self.sql_generator.generate(
@@ -130,4 +127,3 @@ class AIService:
                     error=f"SQL 실행 오류: {str(e.orig)}"
                 )
                 continue
-        return None

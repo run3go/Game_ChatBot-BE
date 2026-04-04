@@ -6,8 +6,8 @@ UI_TABLE_MAP = {
     "AVATAR": ["armory_avatars_tb", "armory_profile_tb"],
     "COLLECTIBLE": ["armory_collectibles_tb", "armory_collectible_details_tb"],
     "PROFILE": ["armory_profile_tb", "armory_equipment_tb", "armory_card_tb", "armory_card_effects_tb", "armory_gem_tb"],
-    "TOTAL_INFO": ["armory_profile_tb", "armory_equipment_tb", "armory_card_tb", "armory_card_effects_tb", "ark_grid_cores_tb", "ark_grid_effects_tb", "ark_grid_gems_tb", "ark_passive_effects_tb", "ark_passive_points_tb",
-                "armory_engravings_tb", "armory_avatars_tb", "armory_collectibles_tb", "armory_collectible_details_tb", "armory_skills_tb", "armory_gem_effects_tb", "armory_gem_tb"],
+    "TOTAL_INFO": ["armory_profile_tb", "armory_equipment_tb", "armory_card_tb", "armory_card_effects_tb", "ark_grid_cores_tb", "ark_grid_gems_tb", "ark_passive_effects_tb", "ark_passive_points_tb",
+                "armory_engravings_tb", "armory_avatars_tb", "armory_collectibles_tb", "armory_collectible_details_tb", "armory_skills_tb", "armory_gem_tb"],
     "MARKET_ITEMS": ["market_items_tb"],
     "AUCTION_ITEMS": ["auction_items_tb"]
 }

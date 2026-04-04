@@ -1,5 +1,4 @@
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.exceptions import OutputParserException
 from output_types import SQLWithUIType, QuestionAnalysis
 
 class SQLGenerator:
@@ -7,45 +6,43 @@ class SQLGenerator:
     def __init__(self, llm):
         self.llm = llm
 
-    def generate(self, question: str, analysis : QuestionAnalysis, schema, nicknames: list[str] | None = None, error: str | None = None):
+    def generate(self, question: str, analysis : QuestionAnalysis, schema, nicknames: list[str] | None = None, error: str | None = None, few_shots: str = ""):
         prompt = ChatPromptTemplate.from_template("""
             너는 로스트아크 DB 전문가야.
 
-            [SQL 출력 규칙]
-            - 반드시 [스키마]에 명시된 테이블만 사용해. 그 외 테이블(예: characters, users, skills 등)은 절대 사용 금지.
-            - 테이블에 접근할 때는 접두사로 lostark.를 사용해.
-            - 동일 character_name에 대해 여러 시점의 데이터가 있을 경우, collected_at이 MAX인 행만 사용해.
+            [공통 SQL 규칙]
+            - 반드시 [스키마]에 명시된 테이블만 사용해. 그 외 테이블은 절대 사용 금지.
+            - 테이블 접두사는 lostark.를 사용해.
+            - 동적 테이블(collected_at 존재): 단일 캐릭터 조회 시 WITH step00 AS (SELECT MAX(collected_at) AS recent_collect_time FROM ... WHERE character_name = '닉네임') 패턴으로 최신 시점을 구해.
+            - 정적 테이블(collected_at 없음, 예: lostark_skill_tripod): WITH 절 없이 바로 조회해.
+            - 동점자 포함 상위 N개: ORDER BY ... DESC FETCH FIRST 1 ROWS WITH TIES.
+            - 교집합 없는 데이터 추출: NOT EXISTS.
+            - 동적 테이블 2개 조인: WITH 절에서 각 테이블의 최신 시점을 별도로 구한 뒤 메인 쿼리에서 조인해.
+            - 여러 통계와 리스트를 한 번에 가져올 때는 JOIN 대신 상호관련 서브쿼리를 사용해.
 
             {error_feedback}
-                                                  
+
             [response_format별 SQL 규칙]
-            - COUNT: COUNT(*) 단일 값만 반환. json_agg 사용 금지. AS 별칭은 의미 있게 지정. (예: 황로드유_겁화_count)
-            - COUNT_LIST: GROUP BY + COUNT(*) 로 항목별 개수 목록 반환. json_agg 사용 금지.
-            - VALUE: 단일 수치 컬럼 하나만 반환.
-            - COMPARE: 메인 쿼리에 FROM 절 없이, 캐릭터별 서브쿼리를 개별 컬럼(AS 캐릭터명_data)으로 분리하고 json_build_object로 캡슐화해.
-            - DISPLAY: 반드시 아래 구조를 따라야 해. 최상위 SELECT에 FROM 절 없이, 테이블마다 서브쿼리 컬럼으로 구성해.
-              AS 별칭은 테이블 원본 이름을 그대로 사용해. (예: AS armory_skills_tb)
-              ※ 주의: AS 별칭은 반드시 가장 바깥쪽 서브쿼리 닫는 괄호 ) 뒤에 위치해야 해.
-              SELECT
-                (SELECT COALESCE(json_agg(t.*), '[]'::json) FROM lostark.{{테이블A}} t
-                 WHERE t.character_name = '닉네임' AND t.collected_at = (SELECT MAX(t2.collected_at) FROM lostark.{{테이블A}} t2 WHERE t2.character_name = '닉네임')
-                ) AS {{테이블A}},
-                (SELECT COALESCE(json_agg(t.*), '[]'::json) FROM lostark.{{테이블B}} t
-                 WHERE t.character_name = '닉네임' AND t.collected_at = (SELECT MAX(t2.collected_at) FROM lostark.{{테이블B}} t2 WHERE t2.character_name = '닉네임')
-                ) AS {{테이블B}}
+            - COUNT: COUNT(*) 단일 값만 반환. AS 별칭은 의미 있게 지정.
+            - COUNT_LIST: GROUP BY + COUNT(*). 전체 유저 통계 시 character_name별 MAX(collected_at)로 최신 시점을 구한 뒤 조인.
+            - VALUE: SUM·AVG 등 단일 집계 수치 하나만 반환. 절대 행 전체를 반환하지 마.
+            - TEXT / DISPLAY / LIST: WITH step00 패턴으로 최신 시점을 구한 뒤 조건에 맞는 행을 반환.
+              "가장 높은/낮은 ~가 뭐야?" 처럼 특정 대상(행)을 찾는 질문은 ORDER BY ... DESC FETCH FIRST 1 ROWS WITH TIES로 행을 반환해.
+            - COMPARE(캐릭터 간): FROM 절 없이 캐릭터별 서브쿼리를 컬럼으로 분리하고 json_build_object로 캡슐화. AS "캐릭터명_data".
+            - COMPARE(시점 비교): LAG 윈도우 함수로 이전 수집 시점의 값을 추출하고, 변경 여부(is_changed)와 변경 전/후 값을 함께 행 단위로 반환. 이전값은 prev_* 컬럼, 현재값은 current_* 컬럼으로 명명.
 
-            [분석 규칙]
-            - 여러 테이블의 통계(Count, Sum)와 리스트를 한 번에 가져올 때는 JOIN 대신 상호관련 서브쿼리를 사용해.
+            [category별 SQL 규칙]
+            - GLOBAL(스킬 정보 조회 시): lostark.lostark_skill_tripod, lostark.lostark_skill_level 테이블만 사용. character_name 조건 및 armory_skills_tb 조인 절대 금지.
+            - SKILL + COMPARE: 반드시 armory_skills_tb와 armory_gem_tb를 함께 사용해. 스킬 정보에 해당 스킬의 보석 이름 목록(gems)을 jsonb_agg(g.name)으로 포함시켜.
 
-            [ui_type 결정 규칙]
-            - SQL이 캐릭터 테이블 전체 컬럼(t.* 또는 *)을 반환하면 → [분석]의 category 그대로 반환 (SKILL, ENGRAVING, ARK_GRID 등)
-            - SQL이 특정 컬럼만 반환하거나 COUNT·SUM 등 집계값이면 → TEXT
+            {few_shots}
 
             [질문]
             {question}
 
             [분석]
             {analysis}
+            ※ response_format이 [유사 예시]의 분석 유형과 일치하는 예시를 우선 참고해.
 
             [대상 닉네임]
             {nicknames}
@@ -67,22 +64,24 @@ class SQLGenerator:
                 "nicknames": nicknames if nicknames else "",
                 "schema": schema,
                 "error_feedback": f"[이전 시도 오류 - 반드시 수정]\n{error}\n위 오류를 반드시 수정해서 다시 생성해." if error else "",
+                "few_shots": few_shots,
         })
 
         if result is None:
             raise ValueError("SQL 생성 결과가 없습니다.")
         return self._clean_sql(result.sql), result.ui_type
 
-    def generate_validated(self, question: str, analysis: QuestionAnalysis, schema: dict, nicknames: list[str] | None = None) -> tuple[str, str, set]:
-        sql, ui_type = self.generate(question, analysis, schema, nicknames)
+    def generate_validated(self, question: str, analysis: QuestionAnalysis, schema: dict, nicknames: list[str] | None = None, few_shots: str = "", all_tables: set | None = None) -> tuple[str, str, set]:
+        allowed = all_tables if all_tables is not None else set(schema.keys())
+        sql, ui_type = self.generate(question, analysis, schema, nicknames, few_shots=few_shots)
         for attempt in range(2):
             used = {w.split(".")[-1] for w in sql.split() if "lostark." in w}
-            invalid = used - set(schema.keys())
+            invalid = used - allowed
             if not invalid:
                 return sql, ui_type, used
             if attempt == 1:
                 raise ValueError(f"LLM이 허용되지 않은 테이블을 사용했습니다: {invalid}")
-            sql, ui_type = self.generate(question, analysis, schema, nicknames, error=f"허용되지 않은 테이블 사용: {invalid}. 반드시 [스키마]에 있는 테이블만 사용해.")
+            sql, ui_type = self.generate(question, analysis, schema, nicknames, error=f"허용되지 않은 테이블 사용: {invalid}. 반드시 [스키마]에 있는 테이블만 사용해.", few_shots=few_shots)
         return sql, ui_type, used
 
     def _clean_sql(self, sql: str):

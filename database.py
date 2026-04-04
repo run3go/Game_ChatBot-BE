@@ -7,7 +7,11 @@ import os
 
 load_dotenv()
 
-engine = create_engine(os.getenv("DB_URL"))
+db_url = os.getenv("DB_URL")
+if not db_url:
+    raise RuntimeError("환경변수 DB_URL이 설정되지 않았습니다.")
+
+engine = create_engine(db_url)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()

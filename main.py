@@ -27,9 +27,9 @@ airflow = AirflowManager()
 
 
 llm = ChatOpenAI(
-  model="openai/gpt-4o", 
+  model="openai/gpt-4o",
   temperature=0,
-  openai_api_key= os.getenv("OPENROUTER_API_KEY"), 
+  openai_api_key= os.getenv("OPENROUTER_API_KEY"),
   openai_api_base="https://openrouter.ai/api/v1",
   default_headers={
     "X-Title": "LostArk Chatbot"
@@ -51,7 +51,7 @@ async def lifespan(_: FastAPI):
         print(f"성공적으로 {count}개의 테이블 스키마를 벡터스토어에 로드했습니다.")
     except Exception as e:
         print(f"스키마 벡터스토어 로드 중 오류 발생: {e}")
-        
+
     finally:
         db.close()
 
@@ -79,12 +79,15 @@ def ask_ai_stream(
 
     def generate():
         result = None
+        result_text = None
         try:
             for event_type, event_data in service.ask(question, history):
                 if event_type == "status":
                     yield f"data: {json.dumps({'type': 'status', 'content': event_data})}\n\n"
-                else:
+                elif event_type == "result":
                     result = event_data
+                elif event_type == "result_text":
+                    result_text = event_data
         except Exception:
             yield f"data: {json.dumps({'type': 'error', 'content': '잠시 후 다시 시도해 주세요.'})}\n\n"
             yield "data: [DONE]\n\n"
@@ -96,6 +99,9 @@ def ask_ai_stream(
                 yield f"data: {json.dumps({'type': 'confirm_collect', 'nickname': result['nickname']})}\n\n"
             elif isinstance(result, dict):
                 yield f"data: {json.dumps({'type': 'structured', 'payload': result})}\n\n"
+                for chunk in result_text or []:
+                    if chunk:
+                        yield f"data: {json.dumps({'type': 'text', 'content': chunk})}\n\n"
             else:
                 for chunk in result or []:
                     if chunk:
