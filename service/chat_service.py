@@ -27,7 +27,17 @@ class ChatService:
 
     def get_sessions(self, user_id: str) -> list:
         rows = self.db.execute(
-            text("SELECT chat_id, title, created_at FROM public.chat_sessions_tb WHERE user_id = :user_id ORDER BY created_at DESC"),
+            text("""
+                SELECT cs.chat_id, cs.title, cs.created_at
+                FROM public.chat_sessions_tb cs
+                LEFT JOIN (
+                    SELECT chat_id, MAX(created_at) AS last_msg_at
+                    FROM public.chat_messages_tb
+                    GROUP BY chat_id
+                ) lm ON cs.chat_id = lm.chat_id
+                WHERE cs.user_id = :user_id
+                ORDER BY COALESCE(lm.last_msg_at, cs.created_at) DESC
+            """),
             {"user_id": user_id},
         ).mappings().all()
         return [
