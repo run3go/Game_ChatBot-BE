@@ -18,7 +18,13 @@ def clean_word(word: str) -> str:
 
 def format_history(history: list[dict], limit: int = 6) -> str:
     lines = []
-    for m in history[-limit:]:
+    regular = []
+    for m in history:
+        if m['role'] == 'summary':
+            lines.append(f"[이전 대화 요약]\n{m['content']}")
+        else:
+            regular.append(m)
+    for m in regular[-limit:]:
         if m['role'] == 'user':
             line = f"사용자: {m['content']}"
             if m.get('nicknames'):

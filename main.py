@@ -1,6 +1,7 @@
-from fastapi import FastAPI, Depends, Body, HTTPException
+from fastapi import FastAPI, Depends, Body, HTTPException, BackgroundTasks, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,6 +20,7 @@ from database import get_db, SessionLocal
 from service.ai_service import AIService
 from service.airflow_service import AirflowManager, CharacterRequest
 from service.nickname_service import load_nicknames
+from service.chat_service import ChatService, run_background_save, generate_title
 from sql.schema_store import SCHEMA_STORE
 
 load_dotenv()
@@ -69,19 +71,95 @@ app.add_middleware(
     allow_headers=["*"]
 )
 
-@app.post("/ask/stream")
-def ask_ai_stream(
-    question: str = Body(...),
-    history: Optional[list[dict]] = Body(default=None),
+@app.post("/users")
+def register_user(
+    user_id: str = Body(..., embed=True),
     db: Session = Depends(get_db),
 ):
-    service = AIService(llm, db)
+    db.execute(
+        text("""
+            INSERT INTO public.user_info_tb (user_id)
+            VALUES (:user_id)
+            ON CONFLICT (user_id) DO UPDATE SET last_accessed_at = CURRENT_TIMESTAMP
+        """),
+        {"user_id": user_id},
+    )
+    db.commit()
+    return {"user_id": user_id}
+
+
+@app.post("/chat/sessions")
+def create_chat_session(
+    user_id: str = Body(..., embed=True),
+    db: Session = Depends(get_db),
+):
+    chat_id = ChatService(db).create_session(user_id)
+    return {"chat_id": chat_id}
+
+
+@app.get("/chat/sessions")
+def get_chat_sessions(
+    user_id: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    return ChatService(db).get_sessions(user_id)
+
+
+@app.delete("/chat/sessions/{chat_id}")
+def delete_chat_session(
+    chat_id: str,
+    user_id: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    svc = ChatService(db)
+    if not svc.verify_ownership(chat_id, user_id):
+        raise HTTPException(status_code=403, detail="접근 권한이 없습니다.")
+    svc.delete_session(chat_id)
+    return {"ok": True}
+
+
+@app.get("/chat/sessions/{chat_id}/messages")
+def get_chat_messages(
+    chat_id: str,
+    user_id: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    svc = ChatService(db)
+    if not svc.verify_ownership(chat_id, user_id):
+        raise HTTPException(status_code=403, detail="접근 권한이 없습니다.")
+    return svc.get_recent_messages(chat_id)
+
+
+@app.post("/ask/stream")
+def ask_ai_stream(
+    background_tasks: BackgroundTasks,
+    question: str = Body(...),
+    chat_id: Optional[str] = Body(default=None),
+    user_id: Optional[str] = Body(default=None),
+    db: Session = Depends(get_db),
+):
+    history = None
+    is_first_message = False
+
+    if chat_id and user_id:
+        svc = ChatService(db)
+        if not svc.verify_ownership(chat_id, user_id):
+            raise HTTPException(status_code=403, detail="접근 권한이 없습니다.")
+        recent = svc.get_recent_messages(chat_id)
+        is_first_message = len(recent) == 0
+        summary = svc.get_summary(chat_id)
+        history = ([{"role": "summary", "content": summary}] if summary else []) + recent
+
+    ai_service = AIService(llm, db)
+    answer_parts: list[str] = []
+    structured_result: list = []
+    generated_title: list[str] = []
 
     def generate():
         result = None
         result_text = None
         try:
-            for event_type, event_data in service.ask(question, history):
+            for event_type, event_data in ai_service.ask(question, history):
                 if event_type == "status":
                     yield f"data: {json.dumps({'type': 'status', 'content': event_data})}\n\n"
                 elif event_type == "result":
@@ -95,26 +173,51 @@ def ask_ai_stream(
 
         try:
             if isinstance(result, dict) and result.get("ui_type") == "CONFIRM_COLLECT":
-                yield f"data: {json.dumps({'type': 'text', 'content': result['message']})}\n\n"
+                msg = result['message']
+                answer_parts.append(msg)
+                yield f"data: {json.dumps({'type': 'text', 'content': msg})}\n\n"
                 yield f"data: {json.dumps({'type': 'confirm_collect', 'nickname': result['nickname']})}\n\n"
             elif isinstance(result, dict):
+                structured_result.append(result)
                 yield f"data: {json.dumps({'type': 'structured', 'payload': result})}\n\n"
                 for chunk in result_text or []:
                     if chunk:
+                        answer_parts.append(chunk)
                         yield f"data: {json.dumps({'type': 'text', 'content': chunk})}\n\n"
             else:
                 for chunk in result or []:
                     if chunk:
+                        answer_parts.append(chunk)
                         yield f"data: {json.dumps({'type': 'text', 'content': chunk})}\n\n"
         except Exception:
             yield f"data: {json.dumps({'type': 'error', 'content': '잠시 후 다시 시도해 주세요.'})}\n\n"
         finally:
+            if is_first_message and chat_id and user_id:
+                try:
+                    title = generate_title(question, llm)
+                    generated_title.append(title)
+                    yield f"data: {json.dumps({'type': 'title', 'content': title})}\n\n"
+                except Exception:
+                    pass
             yield "data: [DONE]\n\n"
+
+    if chat_id and user_id:
+        background_tasks.add_task(
+            run_background_save,
+            chat_id,
+            question,
+            answer_parts,
+            structured_result,
+            llm,
+            is_first_message,
+            generated_title,
+        )
 
     return StreamingResponse(
         generate(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        background=background_tasks,
     )
 
 @app.post("/trigger-update")
