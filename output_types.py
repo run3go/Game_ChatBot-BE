@@ -7,6 +7,7 @@ class QuestionAnalysis(BaseModel):
   category: Literal["GENERAL", "GLOBAL", "TRADING", "SKILL", "ENGRAVING", "AVATAR", "ARK_GRID", "ARK_PASSIVE",
                     "COLLECTIBLE", "PROFILE", "TOTAL_INFO", "EXPEDITION", "MARKET_ITEMS", "AUCTION_ITEMS"] = Field(description="질문 카테고리")
   keywords: List[str] = Field(description="질문에서 닉네임을 제외한 핵심 개념 목록. 은어·약어는 정식 명칭으로 확장. 각 개념을 분리해서 나열. TRADING이면 아이템 정식 명칭 포함.")
+  requires_nickname: bool = Field(description="답변을 위해 특정 캐릭터 닉네임이 반드시 필요한지 여부. 게임 공통 데이터(코어 효과, 스킬 설명, 전체 통계 등) 조회는 False. 특정 캐릭터의 데이터 조회는 True.")
   reason: str = Field(description="response_format의 선정 이유")
 
 class SQLWithUIType(BaseModel):

@@ -71,18 +71,18 @@ class SQLGenerator:
             raise ValueError("SQL 생성 결과가 없습니다.")
         return self._clean_sql(result.sql), result.ui_type
 
-    def generate_validated(self, question: str, analysis: QuestionAnalysis, schema: dict, nicknames: list[str] | None = None, few_shots: str = "", all_tables: set | None = None) -> tuple[str, str, set]:
+    def generate_validated(self, question: str, analysis: QuestionAnalysis, schema: dict, nicknames: list[str] | None = None, few_shots: str = "", all_tables: set | None = None) -> str:
         allowed = all_tables if all_tables is not None else set(schema.keys())
-        sql, ui_type = self.generate(question, analysis, schema, nicknames, few_shots=few_shots)
+        sql, _ = self.generate(question, analysis, schema, nicknames, few_shots=few_shots)
         for attempt in range(2):
             used = {w.split(".")[-1] for w in sql.split() if "lostark." in w}
             invalid = used - allowed
             if not invalid:
-                return sql, ui_type, used
+                return sql
             if attempt == 1:
                 raise ValueError(f"LLM이 허용되지 않은 테이블을 사용했습니다: {invalid}")
-            sql, ui_type = self.generate(question, analysis, schema, nicknames, error=f"허용되지 않은 테이블 사용: {invalid}. 반드시 [스키마]에 있는 테이블만 사용해.", few_shots=few_shots)
-        return sql, ui_type, used
+            sql, _ = self.generate(question, analysis, schema, nicknames, error=f"허용되지 않은 테이블 사용: {invalid}. 반드시 [스키마]에 있는 테이블만 사용해.", few_shots=few_shots)
+        return sql
 
     def _clean_sql(self, sql: str):
         return (

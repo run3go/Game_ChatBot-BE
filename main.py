@@ -10,7 +10,6 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from database import SessionLocal
 from routers import airflow, ask, sessions, users
-from service.nickname_service import load_nicknames
 from sql.schema_store import SCHEMA_STORE
 
 logging.basicConfig(
@@ -22,12 +21,6 @@ logging.basicConfig(
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     db = SessionLocal()
-    try:
-        length = load_nicknames(db)
-        print(f"성공적으로 {length}개의 닉네임을 로드했습니다.")
-    except Exception as e:
-        print(f"닉네임 로드 중 오류 발생: {e}")
-
     try:
         count = SCHEMA_STORE.load(db)
         print(f"성공적으로 {count}개의 테이블 스키마를 벡터스토어에 로드했습니다.")

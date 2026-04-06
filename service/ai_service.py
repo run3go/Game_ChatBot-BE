@@ -39,10 +39,11 @@ class AIService:
 
         if analysis.category == "GENERAL":
             yield "status", "답변을 생성하는 중이에요..."
-            yield "result", self.answer_generator.answer_general(question, history)
+            few_shots = FEW_SHOT_STORE.retrieve(self.db, question)
+            yield "result", self.answer_generator.answer_general(question, history, few_shots)
             return
 
-        if analysis.category in CHARACTER_TYPES and not nicknames:
+        if analysis.requires_nickname and not nicknames:
             if unverified:
                 nickname = unverified[0]
                 yield "result", {
@@ -82,11 +83,14 @@ class AIService:
             yield "result", result
 
     def _resolve_nicknames(self, candidates: list, llm_nicknames: list | None) -> tuple[list, list]:
-        if candidates:
-            return candidates, []
-        if llm_nicknames:
-            return validate_nicknames_batch(self.db, llm_nicknames)
-        return [], []
+        if not llm_nicknames:
+            return [], []
+        confirmed = [c for c in candidates if c in llm_nicknames]
+        unvalidated = [n for n in llm_nicknames if n not in candidates]
+        if unvalidated:
+            verified, unverified = validate_nicknames_batch(self.db, unvalidated)
+            return confirmed + verified, unverified
+        return confirmed, []
 
     def _handle_complex(self, question: str, nicknames: list, analysis: QuestionAnalysis, history: list[dict]):
         if analysis.category == "TOTAL_INFO" and nicknames:
@@ -106,7 +110,7 @@ class AIService:
 
         few_shots = FEW_SHOT_STORE.retrieve(self.db, question)
         all_tables = set(SCHEMA_STORE.get_all().keys())
-        sql, ui_type, used = self.sql_generator.generate_validated(question, analysis, schema, nicknames, few_shots=few_shots, all_tables=all_tables)
+        sql= self.sql_generator.generate_validated(question, analysis, schema, nicknames, few_shots=few_shots, all_tables=all_tables)
 
         result = self._execute_sql(sql, False, question, analysis, schema, nicknames)
         if result is None:
