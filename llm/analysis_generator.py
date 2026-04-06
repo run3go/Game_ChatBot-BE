@@ -1,6 +1,6 @@
 from langchain_core.prompts import ChatPromptTemplate
 from output_types import QuestionAnalysis
-from game_knowledge import SLANG_RULES
+from game_knowledge import GAME_KNOWLEDGE
 from utils.chat_utils import format_history
 
 class AnalysisGenerator:
@@ -46,7 +46,7 @@ class AnalysisGenerator:
         - 클래스(워로드, 버서커, 소서리스 등 game_knowledge의 직업명, 아크 패시브 클래스)이 포함된 표현은 빌드 유형을 나타내며 닉네임이 아님. nicknames=[], requires_nickname=False로 처리.
 
         [게임 은어 규칙]
-        {slang_rules}
+        {game_knowledge}
         - keywords: 닉네임을 제외한 질문의 핵심 개념들을 정식 명칭으로 분리해서 추출. 은어·약어가 있으면 위 규칙으로 확장. 질문에 없는 정보는 추가하지 말 것.
           각 개념은 SQL 조건 힌트가 될 수 있도록 구체적으로 작성.
           복합 개념은 반드시 개별 개념으로 쪼개서 나열할 것. 상위 개념(스킬, 보석, 각인 등)도 항상 별도로 포함해서 관련 테이블이 넓게 검색되도록 할 것.
@@ -105,7 +105,7 @@ class AnalysisGenerator:
             "question": question,
             "history": history_text or "없음",
             "candidates": candidates or [],
-            "slang_rules": SLANG_RULES,
+            "game_knowledge": GAME_KNOWLEDGE,
             })
         
         if result is None:

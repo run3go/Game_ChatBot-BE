@@ -7,7 +7,7 @@ _airflow = AirflowManager()
 
 
 @router.post("/trigger-update")
-def update_character_data(req: CharacterRequest):
+async def update_character_data(req: CharacterRequest):
     try:
         result = _airflow.trigger_dag(
             dag_id="chatbot_response_processor",
@@ -23,7 +23,7 @@ def update_character_data(req: CharacterRequest):
 
 
 @router.get("/dag-status/{run_id}")
-def get_dag_status(run_id: str):
+async def get_dag_status(run_id: str):
     try:
         status = _airflow.get_dag_run_status("chatbot_response_processor", run_id)
         return {"status": status}
