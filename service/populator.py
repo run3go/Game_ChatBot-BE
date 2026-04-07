@@ -7,6 +7,11 @@ _ALLOWED_TABLES = {t for tables in UI_TABLE_MAP.values() for t in tables}
 
 logger = logging.getLogger(__name__)
 
+
+def _merge(base: dict, meta: dict, exclude: str) -> dict:
+    return {**base, **{k: v for k, v in meta.items() if k != exclude}}
+
+
 class DataPopulator:
 
     def __init__(self, db):
@@ -20,9 +25,8 @@ class DataPopulator:
 
     def _populate_skill(self, data: dict) -> dict:
         skills = data.get("armory_skills_tb", [])
-
         pairs = {(s["skill_name"], s["skill_level"]) for s in skills if s.get("skill_name") and s.get("skill_level") is not None}
-        names = [p[0] for p in pairs]
+        names = list({name for name, _ in pairs})
         if not names:
             return data
 
@@ -35,11 +39,8 @@ class DataPopulator:
             {"names": names}
         ).mappings().all()
 
-        skill_map = {r["skill_name"]: r for r in rows if (r["skill_name"], r["skill_level"]) in pairs}
-        data["armory_skills_tb"] = [
-            {**s, **{k: v for k, v in skill_map.get(s["skill_name"], {}).items() if k != "skill_name"}}
-            for s in skills
-        ]
+        skill_map = {(r["skill_name"], r["skill_level"]): r for r in rows if (r["skill_name"], r["skill_level"]) in pairs}
+        data["armory_skills_tb"] = [_merge(s, skill_map.get((s["skill_name"], s["skill_level"]), {}), "skill_name") for s in skills]
         return data
 
     def _populate_engraving(self, data: dict) -> dict:
@@ -59,16 +60,60 @@ class DataPopulator:
         ).mappings().all()
 
         meta_map = {r["engrave_name"]: dict(r) for r in rows}
-        data["armory_engravings_tb"] = [
-            {**e, **{k: v for k, v in meta_map.get(e["name"], {}).items() if k != "engrave_name"}}
-            for e in engravings
-        ]
+        data["armory_engravings_tb"] = [_merge(e, meta_map.get(e["name"], {}), "engrave_name") for e in engravings]
         return data
 
     def _populate_total_info(self, data: dict) -> dict:
-        data = self._populate_skill(data)
-        data = self._populate_ark_passive(data)
-        data = self._populate_engraving(data)
+        skills = data.get("armory_skills_tb", [])
+        engravings = data.get("armory_engravings_tb", [])
+        effects = data.get("ark_passive_effects_tb", [])
+
+        skill_names = list({s["skill_name"] for s in skills if s.get("skill_name")})
+        engrave_names = list({e["name"] for e in engravings if e.get("name")})
+        passive_names = list({e["effect_name"] for e in effects if e.get("effect_name")})
+
+        if not any((skill_names, engrave_names, passive_names)):
+            return data
+
+        row = self.db.execute(text("""
+            SELECT
+                (SELECT COALESCE(json_agg(s.*), '[]'::json)
+                 FROM lostark.lostark_skill_level s
+                 WHERE s.skill_name = ANY(:skill_names)) AS skill_meta,
+                (SELECT COALESCE(json_agg(e.*), '[]'::json)
+                 FROM lostark.engrave e
+                 WHERE e.engrave_name = ANY(:engrave_names)) AS engraving_meta,
+                (SELECT COALESCE(json_agg(p.*), '[]'::json)
+                 FROM lostark.ark_passive p
+                 WHERE p.passive_name = ANY(:passive_names)) AS passive_meta
+        """), {
+            "skill_names": skill_names or [""],
+            "engrave_names": engrave_names or [""],
+            "passive_names": passive_names or [""],
+        }).mappings().fetchone()
+
+        if not row:
+            return data
+
+        if skills and skill_names:
+            pairs = {(s["skill_name"], s["skill_level"]) for s in skills if s.get("skill_name") and s.get("skill_level") is not None}
+            skill_map = {(r["skill_name"], r["skill_level"]): r for r in (row["skill_meta"] or []) if (r["skill_name"], r["skill_level"]) in pairs}
+            data["armory_skills_tb"] = [_merge(s, skill_map.get((s["skill_name"], s["skill_level"]), {}), "skill_name") for s in skills]
+
+        if engravings and engrave_names:
+            meta_map = {r["engrave_name"]: r for r in (row["engraving_meta"] or [])}
+            data["armory_engravings_tb"] = [_merge(e, meta_map.get(e["name"], {}), "engrave_name") for e in engravings]
+
+        if effects and passive_names:
+            meta_map = {r["passive_name"]: r for r in (row["passive_meta"] or [])}
+            data["ark_passive_effects_tb"] = [
+                {**e,
+                 "req_points": (meta := meta_map.get(e["effect_name"], {})).get("req_points"),
+                 "max_level": meta.get("max_level"),
+                 "level_effect": meta.get(f"lv{e['level']}_effect") if e.get("level") is not None else None}
+                for e in effects
+            ]
+
         return data
 
     def _populate_ark_passive(self, data: dict) -> dict:
@@ -89,22 +134,13 @@ class DataPopulator:
         ).mappings().all()
 
         meta_map = {r["passive_name"]: dict(r) for r in rows}
-
-        enriched = []
-        for e in effects:
-            meta = meta_map.get(e["effect_name"], {})
-            level = e.get("level")
-            level_effect = None
-            if level is not None:
-                level_effect = meta.get(f"lv{level}_effect")
-            enriched.append({
-                **e,
-                "req_points": meta.get("req_points"),
-                "max_level": meta.get("max_level"),
-                "level_effect": level_effect,
-            })
-
-        data["ark_passive_effects_tb"] = enriched
+        data["ark_passive_effects_tb"] = [
+            {**e,
+             "req_points": (meta := meta_map.get(e["effect_name"], {})).get("req_points"),
+             "max_level": meta.get("max_level"),
+             "level_effect": meta.get(f"lv{e['level']}_effect") if e.get("level") is not None else None}
+            for e in effects
+        ]
         return data
 
     def fetch_missing_tables(self, nickname: str, tables: list) -> dict:
@@ -124,4 +160,3 @@ class DataPopulator:
             logger.error("fetch_missing_tables 실패 (tables=%s): %s", tables, e)
             self.db.rollback()
             return {}
-

@@ -40,6 +40,8 @@ def ask_ai_stream(
     answer_parts: list[str] = []
     structured_result: list = []
     generated_title: list[str] = []
+    resolved_nicknames: list[str] = []
+    generated_sql: list[str] = []
 
     def generate():
         result = None
@@ -52,6 +54,10 @@ def ask_ai_stream(
                     result = event_data
                 elif event_type == "result_text":
                     result_text = event_data
+                elif event_type == "nicknames":
+                    resolved_nicknames[:] = event_data
+                elif event_type == "sql":
+                    generated_sql[:] = [event_data]
         except Exception:
             yield f"data: {json.dumps({'type': 'error', 'content': '잠시 후 다시 시도해 주세요.'})}\n\n"
             yield "data: [DONE]\n\n"
@@ -97,6 +103,8 @@ def ask_ai_stream(
             llm,
             is_first_message,
             generated_title,
+            resolved_nicknames,
+            generated_sql,
         )
 
     return StreamingResponse(

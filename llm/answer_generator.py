@@ -17,6 +17,20 @@ class AnswerGenerator:
     def __init__(self, llm):
         self.llm = llm
 
+    def _chain(self, prompt):
+        return (prompt | self.llm).with_retry(stop_after_attempt=2)
+
+    def _history(self, history, limit=10) -> str:
+        return format_history(history, limit=limit) if history else "없음"
+
+    def _stream(self, chain, inputs: dict, label: str):
+        try:
+            for chunk in chain.stream(inputs):
+                yield chunk.content
+        except Exception:
+            logger.exception("%s 스트리밍 실패", label)
+            yield "잠시 후 다시 시도해 주세요."
+
     def answer_general(self, question: str, history: list[dict] | None = None):
         prompt = ChatPromptTemplate.from_template("""
             너는 로스트아크 AI 비서야.
@@ -33,19 +47,11 @@ class AnswerGenerator:
             [질문]
             {question}
         """)
-        history_text = format_history(history, limit=10) if history else ""
-
-        chain = (prompt | self.llm).with_retry(stop_after_attempt=2)
-        try:
-            for chunk in chain.stream({
-                "question": question,
-                "history": history_text or "없음",
-                "game_knowledge": GAME_KNOWLEDGE,
-            }):
-                yield chunk.content
-        except Exception:
-            logger.exception("answer_general 스트리밍 실패")
-            yield "잠시 후 다시 시도해 주세요."
+        yield from self._stream(self._chain(prompt), {
+            "question": question,
+            "history": self._history(history),
+            "game_knowledge": GAME_KNOWLEDGE,
+        }, "answer_general")
 
     def answer_display(self, question: str, ui_type: str, data: dict, history: list[dict] | None = None):
         prompt = ChatPromptTemplate.from_template("""
@@ -67,20 +73,12 @@ class AnswerGenerator:
             [데이터(JSON)]
             {data}
         """)
-        history_text = format_history(history, limit=10) if history else ""
-
-        chain = (prompt | self.llm).with_retry(stop_after_attempt=2)
-        try:
-            for chunk in chain.stream({
-                "question": question,
-                "ui_type": ui_type,
-                "data": json.dumps(data, ensure_ascii=False, default=_json_default),
-                "history": history_text or "없음",
-            }):
-                yield chunk.content
-        except Exception:
-            logger.exception("answer_display 스트리밍 실패")
-            yield "잠시 후 다시 시도해 주세요."
+        yield from self._stream(self._chain(prompt), {
+            "question": question,
+            "ui_type": ui_type,
+            "data": json.dumps(data, ensure_ascii=False, default=_json_default),
+            "history": self._history(history),
+        }, "answer_display")
 
     def answer(self, question: str, data, history: list[dict] | None = None):
         data = [dict(row) for row in data]
@@ -131,20 +129,9 @@ class AnswerGenerator:
             [데이터(JSON)]
             {data}
         """)
-
-        history_text = format_history(history, limit=10) if history else ""
-
-        chain = (prompt | self.llm).with_retry(stop_after_attempt=2)
-
-        try:
-            for chunk in chain.stream({
-                "question": question,
-                "data": json.dumps(data, ensure_ascii=False, default=_json_default),
-                "history": history_text or "없음",
-                "game_knowledge": GAME_KNOWLEDGE,
-            }):
-                yield chunk.content
-
-        except Exception:
-            logger.exception("answer 스트리밍 실패")
-            yield "잠시 후 다시 시도해 주세요."
+        yield from self._stream(self._chain(prompt), {
+            "question": question,
+            "data": json.dumps(data, ensure_ascii=False, default=_json_default),
+            "history": self._history(history),
+            "game_knowledge": GAME_KNOWLEDGE,
+        }, "answer")

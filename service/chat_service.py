@@ -59,8 +59,8 @@ class ChatService:
     def get_recent_messages(self, chat_id: str) -> list[dict]:
         rows = self.db.execute(
             text("""
-                SELECT role, content, result_json FROM (
-                    SELECT role, content, result_json, created_at
+                SELECT role, content, result_json, nicknames FROM (
+                    SELECT role, content, result_json, nicknames, created_at
                     FROM public.chat_messages_tb
                     WHERE chat_id = :chat_id
                     ORDER BY created_at DESC
@@ -69,7 +69,7 @@ class ChatService:
             """),
             {"chat_id": chat_id, "limit": HISTORY_LIMIT},
         ).mappings().all()
-        return [{"role": r["role"], "content": r["content"], "result_json": r["result_json"]} for r in rows]
+        return [{"role": r["role"], "content": r["content"], "result_json": r["result_json"], "nicknames": r["nicknames"]} for r in rows]
 
     def get_summary(self, chat_id: str) -> str | None:
         row = self.db.execute(
@@ -78,15 +78,17 @@ class ChatService:
         ).first()
         return row[0] if row else None
 
-    def save_message(self, chat_id: str, role: str, content: str, result_json: dict | None = None):
+    def save_message(self, chat_id: str, role: str, content: str, result_json: dict | None = None, nicknames: list[str] | None = None, sql_query: str | None = None):
         self.db.execute(
-            text("INSERT INTO public.chat_messages_tb (msg_id, chat_id, role, content, result_json) VALUES (:msg_id, :chat_id, :role, :content, CAST(:result_json AS jsonb))"),
+            text("INSERT INTO public.chat_messages_tb (msg_id, chat_id, role, content, result_json, nicknames, sql_query) VALUES (:msg_id, :chat_id, :role, :content, CAST(:result_json AS jsonb), CAST(:nicknames AS text[]), :sql_query)"),
             {
                 "msg_id": str(uuid.uuid4()),
                 "chat_id": chat_id,
                 "role": role,
                 "content": content,
                 "result_json": json.dumps(result_json) if result_json is not None else None,
+                "nicknames": nicknames if nicknames else None,
+                "sql_query": sql_query,
             },
         )
         self.db.commit()
@@ -184,15 +186,18 @@ def run_background_save(
     llm,
     is_first_message: bool,
     generated_title: list[str],
+    nicknames: list[str] | None = None,
+    generated_sql: list[str] | None = None,
 ):
     db = SessionLocal()
     try:
         svc = ChatService(db)
-        svc.save_message(chat_id, "user", question)
+        svc.save_message(chat_id, "user", question, nicknames=nicknames)
         answer_text = "".join(answer_parts)
         result_json = structured_result[0] if structured_result else None
+        sql_query = generated_sql[0] if generated_sql else None
         if answer_text or result_json:
-            svc.save_message(chat_id, "assistant", answer_text, result_json)
+            svc.save_message(chat_id, "assistant", answer_text, result_json, sql_query=sql_query)
         if is_first_message and generated_title:
             svc.set_title_if_empty(chat_id, generated_title[0])
         svc.update_summary(chat_id, llm)

@@ -3,16 +3,11 @@ from service.nickname_service import validate_nicknames_batch
 from constants import POSTPOSITIONS, STOPWORDS
 
 def clean_word(word: str) -> str:
-    for _ in range(3):
-        changed = False
-        for p in sorted(POSTPOSITIONS, key=len, reverse=True):
-            if word.endswith(p):
-                cleaned = word[:-len(p)]
-                if len(cleaned) >= 2:
-                    word = cleaned
-                    changed = True
-                    break
-        if not changed:
+    for p in sorted(POSTPOSITIONS, key=len, reverse=True):
+        if word.endswith(p):
+            cleaned = word[:-len(p)]
+            if len(cleaned) >= 2:
+                return cleaned
             break
     return word
 

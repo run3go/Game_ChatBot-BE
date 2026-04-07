@@ -1,5 +1,4 @@
 import logging
-import traceback
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy import text
 from sql.schema_store import SCHEMA_STORE
@@ -30,41 +29,54 @@ class AIService:
         yield "status", "질문을 분석하는 중이에요..."
         try:
             analysis = self.analysis_generator.analyze(question, history, candidates)
-        except Exception as e:
-            logger.error("분석 실패: %s\n%s", e, traceback.format_exc())
+        except Exception:
+            logger.exception("분석 실패")
             yield "result", ["잠시 후 다시 시도해 주세요."]
             return
 
         nicknames, unverified = self._resolve_nicknames(candidates, analysis.nicknames)
+        yield "nicknames", nicknames
 
         if analysis.category == "GENERAL":
             yield "status", "답변을 생성하는 중이에요..."
             yield "result", self.answer_generator.answer_general(question, history)
             return
 
-        if analysis.requires_nickname and not nicknames:
-            if unverified:
-                nickname = unverified[0]
-                yield "result", {
-                    "ui_type": "CONFIRM_COLLECT",
-                    "nickname": nickname,
-                    "message": f"'{nickname}' 캐릭터 정보가 존재하지 않습니다. 데이터를 수집할까요? (예/아니오)",
-                }
-            else:
-                yield "result", ["어떤 캐릭터에 대해 알고 싶으신가요? 닉네임을 알려주세요!"]
-            return
+        requires_nickname = analysis.category in CHARACTER_TYPES
+
+        if requires_nickname and not nicknames:
+            # LLM이 닉네임을 못 찾았을 때 히스토리에서 명시적으로 상속
+            if not unverified:
+                inherited = self._get_last_nickname_from_history(history)
+                if inherited:
+                    nicknames = inherited
+            # 상속 후에도 없으면 사용자에게 요청
+            if not nicknames:
+                if unverified:
+                    nickname = unverified[0]
+                    yield "result", {
+                        "ui_type": "CONFIRM_COLLECT",
+                        "nickname": nickname,
+                        "message": f"'{nickname}' 캐릭터 정보가 존재하지 않습니다. 데이터를 수집할까요? (예/아니오)",
+                    }
+                else:
+                    yield "result", ["어떤 캐릭터에 대해 알고 싶으신가요? 닉네임을 알려주세요!"]
+                return
 
         yield "status", "데이터를 조회하는 중이에요..."
         try:
-            result = self._handle_complex(question, nicknames, analysis, history)
+            result, sql = self._handle_complex(question, nicknames, analysis, history)
         except ValueError as e:
             logger.warning("질문 처리 실패 (ValueError): %s", e)
             yield "result", ["질문을 좀 더 구체적으로 해주시면 더 잘 답변드릴 수 있어요."]
             return
-        except Exception as e:
-            logger.error("데이터 조회 실패: %s\n%s", e, traceback.format_exc())
+        except Exception:
+            logger.exception("데이터 조회 실패")
             yield "result", ["잠시 후 다시 시도해 주세요."]
             return
+
+        if sql:
+            yield "sql", sql
 
         if isinstance(result, dict):
             result['nicknames'] = analysis.nicknames
@@ -81,6 +93,16 @@ class AIService:
         else:
             yield "result", result
 
+    def _get_last_nickname_from_history(self, history: list[dict] | None) -> list[str]:
+        """히스토리 메시지의 nicknames 컬럼에서 가장 최근 닉네임을 반환"""
+        if not history:
+            return []
+        for msg in reversed(history):
+            nicks = msg.get("nicknames")
+            if nicks:
+                return [nicks[0]] if isinstance(nicks, list) else [nicks]
+        return []
+
     def _resolve_nicknames(self, candidates: list, llm_nicknames: list | None) -> tuple[list, list]:
         if not llm_nicknames:
             return [], []
@@ -95,32 +117,30 @@ class AIService:
         if analysis.category == "TOTAL_INFO" and nicknames:
             data = self.populator.fetch_missing_tables(nicknames[0], UI_TABLE_MAP["TOTAL_INFO"])
             data = self.populator.populate("TOTAL_INFO", data)
-            return {"ui_type": "TOTAL_INFO", "data": data}
-
-        tables = SCHEMA_STORE.search(analysis.keywords)
-        schema = SCHEMA_STORE.get_schema(tables)
+            return {"ui_type": "TOTAL_INFO", "data": data}, None
 
         if analysis.category in CHARACTER_TYPES and analysis.response_format == "DISPLAY":
-            if nicknames:
-                tables = UI_TABLE_MAP.get(analysis.category, [])
-                data = self.populator.fetch_missing_tables(nicknames[0], tables)
-                data = self.populator.populate(analysis.category, data)
-                return {"ui_type": analysis.category, "data": data}
+            tables = UI_TABLE_MAP.get(analysis.category, [])
+            data = self.populator.fetch_missing_tables(nicknames[0], tables)
+            data = self.populator.populate(analysis.category, data)
+            return {"ui_type": analysis.category, "data": data}, None
 
+        schema = SCHEMA_STORE.get_schema(SCHEMA_STORE.search(analysis.keywords))
         few_shots = FEW_SHOT_STORE.retrieve(self.db, question)
         all_tables = set(SCHEMA_STORE.get_all().keys())
-        sql= self.sql_generator.generate_validated(question, analysis, schema, nicknames, few_shots=few_shots, all_tables=all_tables)
+        sql = self.sql_generator.generate_validated(question, analysis, schema, nicknames, few_shots=few_shots, all_tables=all_tables)
 
-        result = self._execute_sql(sql, False, question, analysis, schema, nicknames)
+        result = self._execute_sql(sql, question, analysis, schema, nicknames)
         if result is None:
-            return ["질문을 좀 더 구체적으로 해주시면 더 잘 답변드릴 수 있어요."]
-        return self.answer_generator.answer(question, result, history)
+            return ["해당 정보를 찾지 못했어요. 질문을 좀 더 구체적으로 해주시면 더 잘 답변드릴 수 있어요."], sql
+        if result == []:
+            return ["조건에 맞는 데이터가 없어요."], sql
+        return self.answer_generator.answer(question, result, history), sql
 
-    def _execute_sql(self, sql: str, fetch_one: bool, question: str, analysis: QuestionAnalysis, schema, nicknames: list):
+    def _execute_sql(self, sql: str, question: str, analysis: QuestionAnalysis, schema, nicknames: list):
         for attempt in range(2):
             try:
-                result = self.db.execute(text(sql))
-                return result.mappings().fetchone() if fetch_one else result.mappings().all()
+                return self.db.execute(text(sql)).mappings().all()
             except ProgrammingError as e:
                 self.db.rollback()
                 if attempt == 1:
@@ -129,4 +149,3 @@ class AIService:
                     question, analysis, schema, nicknames,
                     error=f"SQL 실행 오류: {str(e.orig)}"
                 )
-                continue
