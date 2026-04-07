@@ -39,8 +39,7 @@ class AIService:
 
         if analysis.category == "GENERAL":
             yield "status", "답변을 생성하는 중이에요..."
-            few_shots = FEW_SHOT_STORE.retrieve(self.db, question)
-            yield "result", self.answer_generator.answer_general(question, history, few_shots)
+            yield "result", self.answer_generator.answer_general(question, history)
             return
 
         if analysis.requires_nickname and not nicknames:

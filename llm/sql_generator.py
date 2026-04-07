@@ -35,6 +35,7 @@ class SQLGenerator:
             [category별 SQL 규칙]
             - GLOBAL(스킬 정보 조회 시): lostark.lostark_skill_tripod, lostark.lostark_skill_level 테이블만 사용. character_name 조건 및 armory_skills_tb 조인 절대 금지.
             - SKILL + COMPARE: 반드시 armory_skills_tb와 armory_gem_tb를 함께 사용해. 스킬 정보에 해당 스킬의 보석 이름 목록(gems)을 jsonb_agg(g.name)으로 포함시켜.
+            - PROFILE(단순 레벨 조회 시) : character_level과 item_avg_level을 반드시 함께 SELECT.
 
             {few_shots}
 
@@ -86,9 +87,13 @@ class SQLGenerator:
         return sql
 
     def _clean_sql(self, sql: str):
-        return (
+        sql = (
             sql
             .replace("```sql", "")
             .replace("```", "")
             .strip()
         )
+        sql_upper = sql.upper()
+        if "LIMIT" not in sql_upper and "FETCH FIRST" not in sql_upper:
+            sql = sql.rstrip(";") + "\nLIMIT 200"
+        return sql
