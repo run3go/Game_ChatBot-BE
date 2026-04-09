@@ -1,7 +1,7 @@
 import logging
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy import text
-from sql.schema_store import SCHEMA_STORE
+from sql.db_schema_store import DB_SCHEMA_STORE
 from llm.sql_generator import SQLGenerator
 from llm.analysis_generator import AnalysisGenerator
 from llm.answer_generator import AnswerGenerator
@@ -125,9 +125,9 @@ class AIService:
             data = self.populator.populate(analysis.category, data)
             return {"ui_type": analysis.category, "data": data}, None
 
-        schema = SCHEMA_STORE.get_schema(SCHEMA_STORE.search(analysis.keywords))
-        few_shots = FEW_SHOT_STORE.retrieve(self.db, question)
-        all_tables = set(SCHEMA_STORE.get_all().keys())
+        schema = DB_SCHEMA_STORE.get_schema(self.db, DB_SCHEMA_STORE.search(self.db, analysis.keywords))
+        few_shots = FEW_SHOT_STORE.retrieve(self.db, question, category=analysis.category)
+        all_tables = DB_SCHEMA_STORE.get_all_tables(self.db)
         sql = self.sql_generator.generate_validated(question, analysis, schema, nicknames, few_shots=few_shots, all_tables=all_tables)
 
         result = self._execute_sql(sql, question, analysis, schema, nicknames)

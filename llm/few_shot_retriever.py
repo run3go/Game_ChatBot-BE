@@ -21,7 +21,7 @@ class FewShotStore:
             )
         return self._embeddings
 
-    def retrieve(self, db: Session, question: str, k: int = 3) -> str:
+    def retrieve(self, db: Session, question: str, category: str = "", k: int = 3) -> str:
         try:
             vector = self._get_embeddings().embed_query(question)
         except Exception:
@@ -29,11 +29,13 @@ class FewShotStore:
             return ""
 
         rows = db.execute(text("""
-            SELECT question, analysis_type, explanation, sql_query
-            FROM lostark.few_shot_examples
-            ORDER BY embedding <=> CAST(:embedding AS vector)
+            SELECT question, question_category, analysis_type, explanation, sql_query
+            FROM lostark.few_shot_examples_2
+            ORDER BY
+                CASE WHEN question_category = :category THEN 0 ELSE 1 END,
+                embedding <=> CAST(:embedding AS vector)
             LIMIT :k
-        """), {"embedding": str(vector), "k": k}).mappings().all()
+        """), {"embedding": str(vector), "category": category, "k": k}).mappings().all()
 
         if not rows:
             return ""
@@ -43,6 +45,7 @@ class FewShotStore:
             parts.append(
                 f"예시 {i})\n"
                 f"- 질문: {row['question']}\n"
+                f"- 카테고리: {row['question_category']}\n"
                 f"- 분석 유형: {row['analysis_type']}\n"
                 f"- 힌트: {row['explanation']}\n"
                 f"- SQL:\n{row['sql_query']}"
