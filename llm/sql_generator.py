@@ -33,7 +33,11 @@ class SQLGenerator:
             - COMPARE(시점 비교): LAG 윈도우 함수로 이전 수집 시점의 값을 추출하고, 변경 여부(is_changed)와 변경 전/후 값을 함께 행 단위로 반환. 이전값은 prev_* 컬럼, 현재값은 current_* 컬럼으로 명명.
 
             [category별 SQL 규칙]
-            - GLOBAL(스킬 정보 조회 시): lostark.lostark_skill_tripod, lostark.lostark_skill_level 테이블만 사용. character_name 조건 및 armory_skills_tb 조인 절대 금지.
+            - GLOBAL_SKILL: lostark.lostark_skill_tripod, lostark.lostark_skill_level 테이블만 사용. character_name 조건 및 armory_skills_tb 조인 절대 금지.
+            - GLOBAL_ARK_PASSIVE: lostark.lostark_ark_passive_effects 계열 테이블만 사용. character_name 조건 및 캐릭터 테이블 조인 절대 금지.
+            - GLOBAL_ARK_GRID: lostark.lostark_ark_grid_cores 계열 테이블만 사용. character_name 조건 및 캐릭터 테이블 조인 절대 금지.
+            - GLOBAL_ENGRAVING: lostark.lostark_engravings 계열 테이블만 사용. character_name 조건 및 캐릭터 테이블 조인 절대 금지.
+            - GLOBAL_PROFILE: 전체 유저 집계 시 character_name별 MAX(collected_at)로 최신 시점을 구한 뒤 조인. character_name 조건 없이 집계.
             - SKILL + COMPARE: 반드시 armory_skills_tb와 armory_gem_tb를 함께 사용해. 스킬 정보에 해당 스킬의 보석 이름 목록(gems)을 jsonb_agg(g.name)으로 포함시켜.
             - PROFILE(단순 레벨 조회 시) : character_level과 item_avg_level을 반드시 함께 SELECT.
 

@@ -130,14 +130,14 @@ class AIService:
         all_tables = DB_SCHEMA_STORE.get_all_tables(self.db)
         sql = self.sql_generator.generate_validated(question, analysis, schema, nicknames, few_shots=few_shots, all_tables=all_tables)
 
-        result = self._execute_sql(sql, question, analysis, schema, nicknames)
+        result = self._execute_sql(sql, question, analysis, schema, nicknames, few_shots=few_shots)
         if result is None:
             return ["해당 정보를 찾지 못했어요. 질문을 좀 더 구체적으로 해주시면 더 잘 답변드릴 수 있어요."], sql
         if result == []:
             return ["조건에 맞는 데이터가 없어요."], sql
         return self.answer_generator.answer(question, result, history), sql
 
-    def _execute_sql(self, sql: str, question: str, analysis: QuestionAnalysis, schema, nicknames: list):
+    def _execute_sql(self, sql: str, question: str, analysis: QuestionAnalysis, schema, nicknames: list, few_shots: str = ""):
         for attempt in range(2):
             try:
                 return self.db.execute(text(sql)).mappings().all()
@@ -147,5 +147,6 @@ class AIService:
                     return None
                 sql, _ = self.sql_generator.generate(
                     question, analysis, schema, nicknames,
-                    error=f"SQL 실행 오류: {str(e.orig)}"
+                    error=f"SQL 실행 오류: {str(e.orig)}",
+                    few_shots=few_shots,
                 )
