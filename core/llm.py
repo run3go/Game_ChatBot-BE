@@ -3,7 +3,7 @@ import os
 from langchain_openai import ChatOpenAI
 
 llm = ChatOpenAI(
-    model="openai/gpt-4o",
+    model="openai/gpt-4o-mini",
     temperature=0,
     max_tokens=8192,
     openai_api_key=os.getenv("OPENROUTER_API_KEY"),
