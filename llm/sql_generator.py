@@ -6,7 +6,7 @@ class SQLGenerator:
     def __init__(self, llm):
         self.llm = llm
 
-    def generate(self, question: str, analysis : QuestionAnalysis, schema, nicknames: list[str] | None = None, error: str | None = None, few_shots: str = ""):
+    def generate(self, question: str, analysis: QuestionAnalysis, schema, nicknames: list[str] | None = None, error: str | None = None, few_shots: str = "", abbr_hints: str = ""):
         prompt = ChatPromptTemplate.from_template("""
             너는 로스트아크 DB 전문가야.
 
@@ -43,6 +43,10 @@ class SQLGenerator:
 
             {few_shots}
 
+            [약어 힌트 - 질문 속 약어와 정식 명칭 매핑]
+            {abbr_hints}
+            ※ 약어 힌트는 참고용임. 문맥상 약어가 아닌 일반 단어로 쓰인 경우 무시할 것.
+
             [질문]
             {question}
 
@@ -71,24 +75,25 @@ class SQLGenerator:
                 "schema": schema,
                 "error_feedback": f"[이전 시도 오류 - 반드시 수정]\n{error}\n위 오류를 반드시 수정해서 다시 생성해." if error else "",
                 "few_shots": few_shots,
+                "abbr_hints": abbr_hints or "없음",
         })
 
         if result is None:
             raise ValueError("SQL 생성 결과가 없습니다.")
         return self._clean_sql(result.sql), result.ui_type
 
-    def generate_validated(self, question: str, analysis: QuestionAnalysis, schema: dict, nicknames: list[str] | None = None, few_shots: str = "", all_tables: set | None = None) -> str:
+    def generate_validated(self, question: str, analysis: QuestionAnalysis, schema: dict, nicknames: list[str] | None = None, few_shots: str = "", all_tables: set | None = None, abbr_hints: str = "") -> str:
         allowed = all_tables if all_tables is not None else set(schema.keys())
 
         def _check_invalid(sql: str) -> set:
             return {w.split(".")[-1] for w in sql.split() if "lostark." in w} - allowed
 
-        sql, _ = self.generate(question, analysis, schema, nicknames, few_shots=few_shots)
+        sql, _ = self.generate(question, analysis, schema, nicknames, few_shots=few_shots, abbr_hints=abbr_hints)
         invalid = _check_invalid(sql)
         if not invalid:
             return sql
 
-        sql, _ = self.generate(question, analysis, schema, nicknames, few_shots=few_shots,
+        sql, _ = self.generate(question, analysis, schema, nicknames, few_shots=few_shots, abbr_hints=abbr_hints,
                                error=f"허용되지 않은 테이블 사용: {invalid}. 반드시 [스키마]에 있는 테이블만 사용해.")
         invalid = _check_invalid(sql)
         if invalid:

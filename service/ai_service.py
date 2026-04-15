@@ -6,6 +6,7 @@ from llm.sql_generator import SQLGenerator
 from llm.analysis_generator import AnalysisGenerator
 from llm.answer_generator import AnswerGenerator
 from llm.few_shot_retriever import FEW_SHOT_STORE
+from llm.embedding_lookup_retriever import EMBEDDING_LOOKUP
 from utils.chat_utils import extract_nicknames
 from service.nickname_service import validate_nicknames_batch
 from service.populator import DataPopulator
@@ -28,7 +29,11 @@ class AIService:
 
         yield "status", "질문을 분석하는 중이에요..."
         try:
-            analysis = self.analysis_generator.analyze(question, history, candidates)
+            lookup_entries = EMBEDDING_LOOKUP.retrieve(self.db, question)
+            abbr_hints = EMBEDDING_LOOKUP.format_abbr_hints(question, lookup_entries)
+            embedding_context = EMBEDDING_LOOKUP.format_context(lookup_entries)
+            excluded_nickname_terms = EMBEDDING_LOOKUP.get_excluded_nickname_terms(lookup_entries)
+            analysis = self.analysis_generator.analyze(question, history, candidates, embedding_context, excluded_nickname_terms)
         except Exception:
             logger.exception("분석 실패")
             yield "result", ["잠시 후 다시 시도해 주세요."]
@@ -65,7 +70,7 @@ class AIService:
 
         yield "status", "데이터를 조회하는 중이에요..."
         try:
-            result, sql = self._handle_complex(question, nicknames, analysis, history)
+            result, sql = self._handle_complex(question, nicknames, analysis, history, lookup_entries, abbr_hints)
         except ValueError as e:
             logger.warning("질문 처리 실패 (ValueError): %s", e)
             yield "result", ["질문을 좀 더 구체적으로 해주시면 더 잘 답변드릴 수 있어요."]
@@ -80,7 +85,6 @@ class AIService:
 
         if isinstance(result, dict):
             result['nicknames'] = analysis.nicknames
-            result['keywords'] = analysis.keywords
             yield "result", result
             if result.get("ui_type") != "TOTAL_INFO":
                 yield "status", "답변을 생성하는 중이에요..."
@@ -113,7 +117,7 @@ class AIService:
             return confirmed + verified, unverified
         return confirmed, []
 
-    def _handle_complex(self, question: str, nicknames: list, analysis: QuestionAnalysis, history: list[dict]):
+    def _handle_complex(self, question: str, nicknames: list, analysis: QuestionAnalysis, history: list[dict], lookup_entries: list[dict] | None = None, abbr_hints: str = ""):
         if analysis.category == "TOTAL_INFO" and nicknames:
             data = self.populator.fetch_missing_tables(nicknames[0], UI_TABLE_MAP["TOTAL_INFO"])
             data = self.populator.populate("TOTAL_INFO", data)
@@ -125,10 +129,25 @@ class AIService:
             data = self.populator.populate(analysis.category, data)
             return {"ui_type": analysis.category, "data": data}, None
 
-        schema = DB_SCHEMA_STORE.get_schema(self.db, DB_SCHEMA_STORE.search(self.db, analysis.keywords))
+        # analysis.category 기반 base_tables + embedding related_tables 합산
+        seen_tables: set = set()
+        priority_tables: list = []
+
+        def _add_tables(tables):
+            for t in tables:
+                if t not in seen_tables:
+                    seen_tables.add(t)
+                    priority_tables.append(t)
+
+        _add_tables(DB_SCHEMA_STORE.search(self.db, [analysis.category]))
+        if lookup_entries:
+            for entry in lookup_entries:
+                _add_tables(entry.get("related_tables", []))
+
+        schema = DB_SCHEMA_STORE.get_schema(self.db, priority_tables)
         few_shots = FEW_SHOT_STORE.retrieve(self.db, question, category=analysis.category)
         all_tables = DB_SCHEMA_STORE.get_all_tables(self.db)
-        sql = self.sql_generator.generate_validated(question, analysis, schema, nicknames, few_shots=few_shots, all_tables=all_tables)
+        sql = self.sql_generator.generate_validated(question, analysis, schema, nicknames, few_shots=few_shots, all_tables=all_tables, abbr_hints=abbr_hints)
 
         result = self._execute_sql(sql, question, analysis, schema, nicknames, few_shots=few_shots)
         if result is None:

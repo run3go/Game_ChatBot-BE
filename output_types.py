@@ -7,7 +7,6 @@ class QuestionAnalysis(BaseModel):
   category: Literal["GENERAL", "GLOBAL_SKILL", "GLOBAL_ARK_PASSIVE", "GLOBAL_ARK_GRID", "GLOBAL_ENGRAVING", "GLOBAL_PROFILE",
                     "TRADING", "SKILL", "ENGRAVING", "AVATAR", "ARK_GRID", "ARK_PASSIVE",
                     "COLLECTIBLE", "PROFILE", "TOTAL_INFO", "EXPEDITION", "MARKET_ITEMS", "AUCTION_ITEMS"] = Field(description="질문 카테고리")
-  keywords: List[str] = Field(description="질문에서 닉네임을 제외한 핵심 개념 목록. 은어·약어는 정식 명칭으로 확장. 각 개념을 분리해서 나열. TRADING이면 아이템 정식 명칭 포함.")
   reason: str = Field(description="response_format의 선정 이유")
 
 class SQLWithUIType(BaseModel):

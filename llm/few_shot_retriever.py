@@ -28,18 +28,27 @@ class FewShotStore:
             logger.exception("few-shot 임베딩 생성 실패")
             return ""
 
-        rows = db.execute(text("""
-            SELECT question, question_category, analysis_type, explanation, sql_query
+        all_rows = db.execute(text("""
+            SELECT question, question_category, analysis_type, explanation, sql_query,
+                   embedding <=> CAST(:embedding AS vector) AS distance
             FROM lostark.few_shot_examples_2
             ORDER BY
                 CASE WHEN question_category = :category THEN 0 ELSE 1 END,
                 embedding <=> CAST(:embedding AS vector)
-            LIMIT :k
-        """), {"embedding": str(vector), "category": category, "k": k}).mappings().all()
+            LIMIT 10
+        """), {"embedding": str(vector), "category": category}).mappings().all()
 
-        if not rows:
+        if not all_rows:
             return ""
 
+        print(f"\n[few-shot 유사도 점수] 질문: {question!r}")
+        print(f"{'순위':<4} {'거리(낮을수록 유사)':<22} {'카테고리':<20} 질문")
+        print("-" * 90)
+        for i, row in enumerate(all_rows, 1):
+            print(f"{i:<4} {row['distance']:<22.6f} {row['question_category']:<20} {row['question']}")
+        print()
+
+        rows = all_rows[:k]
         parts = ["[유사 예시 - 아래 패턴을 참고해서 SQL을 작성해]"]
         for i, row in enumerate(rows, 1):
             parts.append(

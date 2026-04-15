@@ -24,8 +24,7 @@ def format_history(history: list[dict], limit: int = 6) -> str:
             line = f"사용자: {m['content']}"
             if m.get('nicknames'):
                 line += f" [닉네임: {', '.join(m['nicknames'])}]"
-            if m.get('keywords'):
-                line += f" [키워드: {', '.join(m['keywords'])}]"
+
         else:
             line = f"AI: {m['content']}"
         lines.append(line)
