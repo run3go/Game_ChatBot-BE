@@ -79,7 +79,7 @@ class SQLGenerator:
             "input": {
                 "abbr_hints": abbr_hints or "없음",
                 "schema_tables": schema_tables,
-                "few_shots": few_shots[:300] if few_shots else "없음",
+                "few_shots": few_shots if few_shots else "없음",
                 "error_feedback": error or "없음",
             },
             "output": {},
