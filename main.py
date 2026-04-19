@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from fastapi import FastAPI
+
 from fastapi.middleware.cors import CORSMiddleware
 
 from routers import airflow, ask, sessions, users
@@ -15,12 +16,13 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     yield
-
-    print("서버를 종료합니다.")
+    logger.info("서버를 종료합니다.")
 
 
 app = FastAPI(lifespan=lifespan)

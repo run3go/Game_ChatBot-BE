@@ -1,37 +1,52 @@
-import os
 import logging
-from langchain_openai import OpenAIEmbeddings
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+from utils.lazy_embeddings import EmbeddingsMixin
 
 logger = logging.getLogger(__name__)
 
 
-class EmbeddingLookupRetriever:
+class EmbeddingLookupRetriever(EmbeddingsMixin):
 
     def __init__(self):
-        self._embeddings: OpenAIEmbeddings | None = None
+        self._llm = None
 
-    def _get_embeddings(self) -> OpenAIEmbeddings:
-        if self._embeddings is None:
-            self._embeddings = OpenAIEmbeddings(
-                model="openai/text-embedding-3-small",
-                openai_api_key=os.getenv("OPENROUTER_API_KEY"),
-                openai_api_base="https://openrouter.ai/api/v1",
+    def _get_llm(self):
+        if self._llm is None:
+            from utils.llm import llm_sql
+            self._llm = llm_sql
+        return self._llm
+
+    def _extract_keywords(self, question: str) -> list[str]:
+        """LLM으로 질문에서 게임 용어 키워드만 추출."""
+        try:
+            result = self._get_llm().invoke(
+                f'로스트아크 게임 용어 키워드만 쉼표로 추출해. 조사·부사·동사·일반어는 제외.\n"{question}"'
             )
-        return self._embeddings
+            keywords = [k.strip() for k in result.content.split(",") if k.strip()]
+        except Exception:
+            logger.exception("embedding_lookup 키워드 추출 실패, 질문 전체 사용")
+            keywords = [question]
+        logger.info("embedding_lookup 키워드 추출: %s", keywords)
+        return keywords or [question]
 
-    def _text_search(self, db: Session, question: str, k: int) -> list[dict]:
-        """embedding_text의 각 키워드가 질문에 포함되는지 텍스트 매칭"""
+    def _text_search(self, db: Session, keywords: list[str], k: int) -> list[dict]:
+        """키워드별로 embedding_text 텍스트 매칭 (공백 정규화 포함)"""
         rows = db.execute(text("""
             SELECT formal_name, type, related_tables, embedding_text, COUNT(*) AS match_count
             FROM lostark.embedding_lookup,
                  UNNEST(string_to_array(embedding_text, ', ')) AS term
-            WHERE :question ILIKE '%' || term || '%'
+            WHERE EXISTS (
+                SELECT 1 FROM UNNEST(CAST(:keywords AS text[])) AS kw
+                WHERE kw ILIKE '%' || term || '%'
+                   OR term ILIKE '%' || kw || '%'
+                   OR REPLACE(kw, ' ', '') ILIKE '%' || REPLACE(term, ' ', '') || '%'
+                   OR REPLACE(term, ' ', '') ILIKE '%' || REPLACE(kw, ' ', '') || '%'
+            )
             GROUP BY formal_name, type, related_tables, embedding_text
             ORDER BY match_count DESC
             LIMIT :k
-        """), {"question": question, "k": k}).mappings().all()
+        """), {"keywords": keywords, "k": k}).mappings().all()
 
         return [
             {
@@ -43,62 +58,85 @@ class EmbeddingLookupRetriever:
             for row in rows
         ]
 
-    def _vector_search(self, db: Session, question: str, k: int, threshold: float) -> list[dict]:
-        """오타 등 텍스트 매칭 실패 시 임베딩 유사도로 폴백"""
+    def _vector_search(self, db: Session, keywords: list[str], k: int, threshold: float) -> list[dict]:
+        """키워드별 개별 임베딩 후 최고 점수 기준으로 병합 (배치 API 1회 호출)"""
         try:
-            vector = self._get_embeddings().embed_query(question)
+            vectors = self._get_embeddings().embed_documents(keywords)
         except Exception:
             logger.exception("embedding_lookup 임베딩 생성 실패")
             return []
 
-        rows = db.execute(text("""
-            SELECT formal_name, type, related_tables,
-                   1 - (embedding <=> CAST(:vec AS vector)) AS score
-            FROM lostark.embedding_lookup
-            WHERE embedding IS NOT NULL
-            ORDER BY embedding <=> CAST(:vec AS vector)
-            LIMIT :k
-        """), {"vec": str(vector), "k": k}).mappings().all()
+        # 키워드별로 DB 검색, entry별 최고 점수 유지
+        best: dict[str, dict] = {}  # formal_name → {entry, score}
+
+        for vector in vectors:
+            rows = db.execute(text("""
+                SELECT formal_name, type, related_tables, embedding_text,
+                       1 - (embedding <=> CAST(:vec AS vector)) AS score
+                FROM lostark.embedding_lookup
+                WHERE embedding IS NOT NULL
+                ORDER BY embedding <=> CAST(:vec AS vector)
+                LIMIT :k
+            """), {"vec": str(vector), "k": k}).mappings().all()
+
+            for row in rows:
+                score = float(row["score"])
+                name = row["formal_name"]
+                if name not in best or score > best[name]["score"]:
+                    best[name] = {
+                        "formal_name": name,
+                        "type": row["type"],
+                        "related_tables": row["related_tables"] or [],
+                        "embedding_text": row["embedding_text"] or "",
+                        "score": score,
+                    }
+
+        logger.info("embedding_lookup 벡터 점수 (키워드별 최고): %s",
+                    [(name, round(e["score"], 4)) for name, e in
+                     sorted(best.items(), key=lambda x: -x[1]["score"])])
 
         return [
-            {
-                "formal_name": row["formal_name"],
-                "type": row["type"],
-                "related_tables": row["related_tables"] or [],
-            }
-            for row in rows
-            if float(row["score"]) >= threshold
+            {k: v for k, v in e.items() if k != "score"}
+            for e in sorted(best.values(), key=lambda x: -x["score"])
+            if e["score"] >= threshold
         ]
 
-    def retrieve(self, db: Session, question: str, k: int = 5, fallback_threshold: float = 0.55) -> list[dict]:
+    def retrieve(self, db: Session, question: str, k: int = 5, fallback_threshold: float = 0.50) -> list[dict]:
+        keywords = self._extract_keywords(question) or [question]
+
         try:
-            results = self._text_search(db, question, k)
+            text_results = self._text_search(db, keywords, k)
         except Exception:
             logger.exception("embedding_lookup 텍스트 검색 실패")
             db.rollback()
-            results = []
+            text_results = []
 
-        if results:
-            logger.info("embedding_lookup 텍스트 매칭: %s", [r["formal_name"] for r in results])
-            return results
+        logger.info("embedding_lookup 텍스트 매칭: %s", [r["formal_name"] for r in text_results])
 
-        # 텍스트 매칭 실패 시 (오타 등) 임베딩 폴백
-        logger.info("embedding_lookup 텍스트 매칭 없음 → 임베딩 폴백")
         try:
-            results = self._vector_search(db, question, k, fallback_threshold)
+            vector_results = self._vector_search(db, keywords, k, fallback_threshold)
         except Exception:
             logger.exception("embedding_lookup 벡터 검색 실패")
             db.rollback()
-            return []
+            vector_results = []
 
-        logger.info("embedding_lookup 벡터 폴백 결과: %s", [r["formal_name"] for r in results])
-        return results
+        # 텍스트 결과 우선, 벡터 결과로 중복 없이 보충
+        seen = {r["formal_name"] for r in text_results}
+        merged = list(text_results)
+        for r in vector_results:
+            if r["formal_name"] not in seen:
+                merged.append(r)
+                seen.add(r["formal_name"])
+
+        logger.info("embedding_lookup 최종: %s", [r["formal_name"] for r in merged])
+        return merged
 
     # 테이블 type → 분석 카테고리 매핑
     # 닉네임 있으면 앞 카테고리, 없으면 뒤 카테고리 사용
     _TYPE_TO_CATEGORY = {
         "SKILL":              "SKILL / GLOBAL_SKILL",
         "RUNE":               "SKILL / GLOBAL_SKILL",
+        "GEM":                "SKILL / GLOBAL_SKILL",
         "ENGRAVING":          "ENGRAVING / GLOBAL_ENGRAVING",
         "ARK_PASSIVE_EFFECT": "ARK_PASSIVE / GLOBAL_ARK_PASSIVE",
         "ARK_PASSIVE_CLASS":  "ARK_PASSIVE / GLOBAL_ARK_PASSIVE · 닉네임 제외 대상 (아크패시브 클래스 유형)",
@@ -109,9 +147,14 @@ class EmbeddingLookupRetriever:
     }
 
     # embedding_text에 포함된 도메인 태그 (약어가 아닌 검색용 분류어)
-    _DOMAIN_TAGS = {"스킬", "룬", "각인", "아크패시브", "수집품", "카드", "스탯", "장비", "장신구", "악세", "직업", "클래스"}
+    _DOMAIN_TAGS = {"스킬", "룬", "보석", "각인", "아크패시브", "수집품", "카드", "스탯", "장비", "장신구", "악세", "직업", "클래스"}
 
     _NICKNAME_EXCLUDE_TYPES = {"CLASS", "ARK_PASSIVE_CLASS"}
+
+    def _get_abbrs(self, entry: dict) -> list[str]:
+        formal_name = entry.get("formal_name", "")
+        raw_terms = [t.strip() for t in entry.get("embedding_text", "").split(",")]
+        return [t for t in raw_terms if t and t != formal_name and t not in self._DOMAIN_TAGS]
 
     def get_excluded_nickname_terms(self, entries: list[dict]) -> list[str]:
         """CLASS·ARK_PASSIVE_CLASS 타입 entry의 모든 약어와 정식 명칭을 반환. 닉네임 제외 목록으로 사용."""
@@ -119,20 +162,44 @@ class EmbeddingLookupRetriever:
         for entry in entries:
             if entry.get("type") not in self._NICKNAME_EXCLUDE_TYPES:
                 continue
-            raw_terms = [t.strip() for t in entry.get("embedding_text", "").split(",")]
-            terms.extend(t for t in raw_terms if t and t not in self._DOMAIN_TAGS)
+            terms.extend(self._get_abbrs(entry))
         return terms
 
-    def format_abbr_hints(self, question: str, entries: list[dict]) -> str:
-        """질문에 포함된 약어와 정식 명칭 매핑을 힌트 문자열로 반환. 예: '기술→아르데타인의 기술, 스카→스카우터'"""
+    def format_term_hints(self, question: str, entries: list[dict]) -> str:
+        """embedding 검색으로 찾은 모든 정식 명칭을 힌트로 반환. 질문에서 매칭된 표현이 있으면 '매칭어→정식명', 없으면 정식명만 출력."""
         hints = []
         for entry in entries:
-            raw_terms = [t.strip() for t in entry.get("embedding_text", "").split(",")]
-            abbrs = [t for t in raw_terms if t and t != entry["formal_name"] and t not in self._DOMAIN_TAGS]
-            for abbr in abbrs:
+            formal_name = entry["formal_name"]
+            matched = None
+
+            # 1. embedding_text의 약어가 질문에 포함되는지 확인
+            for abbr in self._get_abbrs(entry):
                 if abbr in question:
-                    hints.append(f"{abbr}→{entry['formal_name']}")
+                    matched = abbr
+                    break
+
+            # 2. 공백 제거한 정식명이 질문에 포함되는지 확인 (예: 라이징클로→라이징 클로)
+            if not matched:
+                normalized = formal_name.replace(" ", "")
+                if normalized != formal_name and normalized in question:
+                    matched = normalized
+
+            type_label = self._TYPE_LABEL.get(entry.get("type", ""), "")
+            type_str = f" [{type_label}]" if type_label else ""
+            hints.append(f"{matched}→{formal_name}{type_str}" if matched else f"{formal_name}{type_str}")
         return ", ".join(hints) if hints else "없음"
+
+    _TYPE_LABEL = {
+        "RUNE": "룬",
+        "SKILL": "스킬",
+        "ENGRAVING": "각인",
+        "ARK_PASSIVE_EFFECT": "아크패시브 효과",
+        "ARK_PASSIVE_CLASS": "아크패시브 클래스",
+        "CARD": "카드",
+        "CLASS": "직업",
+        "COLLECTIBLE": "수집품",
+        "PROFILE": "프로필",
+    }
 
     def format_context(self, entries: list[dict]) -> str:
         if not entries:
@@ -140,10 +207,11 @@ class EmbeddingLookupRetriever:
         lines = ["[질문 관련 게임 용어 힌트 - 아래 약어는 게임 용어이며 닉네임이 아님]"]
         for e in entries:
             category = self._TYPE_TO_CATEGORY.get(e["type"], e["type"])
-            raw_terms = [t.strip() for t in e.get("embedding_text", "").split(",")]
-            abbrs = [t for t in raw_terms if t and t != e["formal_name"] and t not in self._DOMAIN_TAGS]
+            type_label = self._TYPE_LABEL.get(e["type"], "")
+            abbrs = self._get_abbrs(e)
             abbr_str = f" (약어: {', '.join(abbrs)})" if abbrs else ""
-            lines.append(f"- {e['formal_name']}{abbr_str} → {category}")
+            type_str = f" [{type_label}]" if type_label else ""
+            lines.append(f"- {e['formal_name']}{type_str}{abbr_str} → {category}")
         return "\n".join(lines)
 
 

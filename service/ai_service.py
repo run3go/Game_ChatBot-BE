@@ -1,7 +1,7 @@
 import logging
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy import text
-from sql.db_schema_store import DB_SCHEMA_STORE
+from utils.db_schema_store import DB_SCHEMA_STORE
 from llm.sql_generator import SQLGenerator
 from llm.analysis_generator import AnalysisGenerator
 from llm.answer_generator import AnswerGenerator
@@ -10,18 +10,23 @@ from llm.embedding_lookup_retriever import EMBEDDING_LOOKUP
 from utils.chat_utils import extract_nicknames
 from service.nickname_service import validate_nicknames_batch
 from service.populator import DataPopulator
-from constants import UI_TABLE_MAP, CHARACTER_TYPES
+from constants import UI_TABLE_MAP, CHARACTER_TYPES, DISPLAY_TRIGGERS
 from output_types import QuestionAnalysis
 
 logger = logging.getLogger(__name__)
 
+_REQUEST_WORDS = {"보여줘", "알려줘", "뭐야", "뭐가", "있어", "뭐있어", "어때", "보여", "줘", "목록", "뭐", "알려"}
+
+
+_GLOBALIZABLE = {"SKILL", "ENGRAVING", "ARK_PASSIVE", "ARK_GRID", "PROFILE"}
+
 class AIService:
 
-    def __init__(self, llm, db):
+    def __init__(self, llm, db, llm_sql=None, llm_answer=None):
         self.db = db
-        self.sql_generator = SQLGenerator(llm)
+        self.sql_generator = SQLGenerator(llm_sql or llm)
         self.analysis_generator = AnalysisGenerator(llm)
-        self.answer_generator = AnswerGenerator(llm)
+        self.answer_generator = AnswerGenerator(llm_answer or llm)
         self.populator = DataPopulator(db)
 
     def ask(self, question: str, history: list[dict] | None = None):
@@ -30,7 +35,7 @@ class AIService:
         yield "status", "질문을 분석하는 중이에요..."
         try:
             lookup_entries = EMBEDDING_LOOKUP.retrieve(self.db, question)
-            abbr_hints = EMBEDDING_LOOKUP.format_abbr_hints(question, lookup_entries)
+            abbr_hints = EMBEDDING_LOOKUP.format_term_hints(question, lookup_entries)
             embedding_context = EMBEDDING_LOOKUP.format_context(lookup_entries)
             excluded_nickname_terms = EMBEDDING_LOOKUP.get_excluded_nickname_terms(lookup_entries)
             analysis = self.analysis_generator.analyze(question, history, candidates, embedding_context, excluded_nickname_terms)
@@ -39,8 +44,23 @@ class AIService:
             yield "result", ["잠시 후 다시 시도해 주세요."]
             return
 
+        if analysis.nicknames and analysis.category.startswith("GLOBAL_"):
+            analysis.category = analysis.category[len("GLOBAL_"):]
+
+        if analysis.response_format == "DISPLAY":
+            q = question
+            for nick in (analysis.nicknames or []):
+                q = q.replace(nick, "")
+            remaining = set(q.split()) - _REQUEST_WORDS - {""}
+            triggers = DISPLAY_TRIGGERS.get(analysis.category, set())
+            if not (remaining and remaining <= triggers):
+                analysis.response_format = "TEXT"
+
         nicknames, unverified = self._resolve_nicknames(candidates, analysis.nicknames)
         yield "nicknames", nicknames
+
+        if not nicknames and analysis.category in _GLOBALIZABLE:
+            analysis.category = "GLOBAL_" + analysis.category
 
         if analysis.category == "GENERAL":
             yield "status", "답변을 생성하는 중이에요..."
@@ -97,6 +117,13 @@ class AIService:
         else:
             yield "result", result
 
+    def _normalize_for_retrieval(self, question: str, nicknames: list[str]) -> str:
+        normalized = question
+        for i, name in enumerate(nicknames, 1):
+            placeholder = "CHARACTER_NAME" if len(nicknames) == 1 else f"CHARACTER_NAME{i}"
+            normalized = normalized.replace(name, placeholder)
+        return normalized
+
     def _get_last_nickname_from_history(self, history: list[dict] | None) -> list[str]:
         """히스토리 메시지의 nicknames 컬럼에서 가장 최근 닉네임을 반환"""
         if not history:
@@ -145,7 +172,9 @@ class AIService:
                 _add_tables(entry.get("related_tables", []))
 
         schema = DB_SCHEMA_STORE.get_schema(self.db, priority_tables)
-        few_shots = FEW_SHOT_STORE.retrieve(self.db, question, category=analysis.category)
+        retrieval_query = self._normalize_for_retrieval(question, nicknames)
+        retrieval_query += f" {analysis.category} {analysis.response_format}"
+        few_shots = FEW_SHOT_STORE.retrieve(self.db, retrieval_query, category=analysis.category)
         all_tables = DB_SCHEMA_STORE.get_all_tables(self.db)
         sql = self.sql_generator.generate_validated(question, analysis, schema, nicknames, few_shots=few_shots, all_tables=all_tables, abbr_hints=abbr_hints)
 
@@ -153,6 +182,8 @@ class AIService:
         if result is None:
             return ["해당 정보를 찾지 못했어요. 질문을 좀 더 구체적으로 해주시면 더 잘 답변드릴 수 있어요."], sql
         if result == []:
+            if analysis.response_format == "COMPARE":
+                return ["변경된 기록이 없습니다."], sql
             return ["조건에 맞는 데이터가 없어요."], sql
         return self.answer_generator.answer(question, result, history), sql
 

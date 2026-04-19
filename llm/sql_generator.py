@@ -6,14 +6,33 @@ class SQLGenerator:
     def __init__(self, llm):
         self.llm = llm
 
+    @staticmethod
+    def _build_term_rules(abbr_hints: str) -> str:
+        """abbr_hints의 A→B 매핑에서 SQL 값 치환 전용 지시 생성. src=dst 동어반복 제외."""
+        import re as _re
+        rules = []
+        for h in abbr_hints.split(", "):
+            if "→" not in h:
+                continue
+            src, dst_full = h.split("→", 1)
+            src = src.strip()
+            dst = _re.sub(r'\s*\[[^\]]+\]$', '', dst_full).strip()
+            if src == dst:
+                continue
+            rules.append(f"- 질문의 '{src}' → '{dst}' ({dst_full.strip()})")
+        if not rules:
+            return ""
+        return "[용어 치환 힌트 - 문맥에 맞게 참고]\n" + "\n".join(rules)
+
     def generate(self, question: str, analysis: QuestionAnalysis, schema, nicknames: list[str] | None = None, error: str | None = None, few_shots: str = "", abbr_hints: str = ""):
         prompt = ChatPromptTemplate.from_template("""
             너는 로스트아크 DB 전문가야.
 
             [공통 SQL 규칙]
-            - 반드시 [스키마]에 명시된 테이블만 사용해. 그 외 테이블은 절대 사용 금지.
+            - 반드시 [스키마]에 명시된 테이블만 사용해. 단, [유사 예시]에 등장하는 테이블은 예외적으로 사용 가능.
             - 테이블 접두사는 lostark.를 사용해.
             - 동적 테이블(collected_at 존재): 단일 캐릭터 조회 시 WITH step00 AS (SELECT MAX(collected_at) AS recent_collect_time FROM ... WHERE character_name = '닉네임') 패턴으로 최신 시점을 구해.
+            - 동적 테이블에서 유저 필터링 시(전체 유저 포함): 반드시 character_name별 MAX(collected_at)로 최신 시점을 먼저 구한 뒤 조인해서 필터링. 예) ark_passive_effects_tb에서 특정 패시브 보유 유저 추출 시 latest_passives CTE 선행 필수.
             - 정적 테이블(collected_at 없음, 예: lostark_skill_tripod): WITH 절 없이 바로 조회해.
             - 동점자 포함 상위 N개: ORDER BY ... DESC FETCH FIRST 1 ROWS WITH TIES.
             - 교집합 없는 데이터 추출: NOT EXISTS.
@@ -29,23 +48,25 @@ class SQLGenerator:
             - VALUE: SUM·AVG 등 단일 집계 수치 하나만 반환. 절대 행 전체를 반환하지 마.
             - TEXT / DISPLAY / LIST: WITH step00 패턴으로 최신 시점을 구한 뒤 조건에 맞는 행을 반환.
               "가장 높은/낮은 ~가 뭐야?" 처럼 특정 대상(행)을 찾는 질문은 ORDER BY ... DESC FETCH FIRST 1 ROWS WITH TIES로 행을 반환해.
-            - COMPARE(캐릭터 간): FROM 절 없이 캐릭터별 서브쿼리를 컬럼으로 분리하고 json_build_object로 캡슐화. AS "캐릭터명_data".
+            - COMPARE(캐릭터 간): 캐릭터별로 WITH latest_캐릭터명 AS (SELECT MAX(collected_at) AS recent_collect_time FROM ... WHERE character_name = '캐릭터명') CTE를 각각 구성. FROM 절 없이 캐릭터별 서브쿼리를 컬럼으로 분리하고 json_build_object로 캡슐화. AS "캐릭터명_data". to_jsonb(row) 및 to_jsonb(s.*) 사용 금지 — 반드시 명시적 컬럼으로 구성.
             - COMPARE(시점 비교): LAG 윈도우 함수로 이전 수집 시점의 값을 추출하고, 변경 여부(is_changed)와 변경 전/후 값을 함께 행 단위로 반환. 이전값은 prev_* 컬럼, 현재값은 current_* 컬럼으로 명명.
 
             [category별 SQL 규칙]
-            - GLOBAL_SKILL: lostark.lostark_skill_tripod, lostark.lostark_skill_level 테이블만 사용. character_name 조건 및 armory_skills_tb 조인 절대 금지.
-            - GLOBAL_ARK_PASSIVE: lostark.lostark_ark_passive_effects 계열 테이블만 사용. character_name 조건 및 캐릭터 테이블 조인 절대 금지.
-            - GLOBAL_ARK_GRID: lostark.lostark_ark_grid_cores 계열 테이블만 사용. character_name 조건 및 캐릭터 테이블 조인 절대 금지.
-            - GLOBAL_ENGRAVING: lostark.lostark_engravings 계열 테이블만 사용. character_name 조건 및 캐릭터 테이블 조인 절대 금지.
-            - GLOBAL_PROFILE: 전체 유저 집계 시 character_name별 MAX(collected_at)로 최신 시점을 구한 뒤 조인. character_name 조건 없이 집계.
+            ⚠️ GLOBAL_* 카테고리 공통: character_name 조건으로 특정 유저 지정 절대 금지.
+            - GLOBAL_SKILL: [스키마]에 있는 테이블 자유롭게 사용. 전체 유저 집계 시 armory_skills_tb 등 캐릭터 테이블 사용 가능.
+            - GLOBAL_ARK_PASSIVE: [스키마]에 있는 테이블 자유롭게 사용. 전체 유저 집계 시 ark_passive_effects_tb 등 캐릭터 테이블 사용 가능.
+            - GLOBAL_ARK_GRID: [스키마]에 있는 테이블 자유롭게 사용. 전체 유저 집계 시 캐릭터 테이블 사용 가능.
+            - GLOBAL_ENGRAVING: [스키마]에 있는 테이블 자유롭게 사용. 각인 효과/정보 조회 시 lostark.engrave 사용, 유저 통계/비교 시 armory_engravings_tb 등 캐릭터 테이블 사용 가능.
+            - GLOBAL_PROFILE: 전체 유저 집계 시 character_name별 MAX(collected_at)로 최신 시점을 구한 뒤 조인.
             - SKILL + COMPARE: 반드시 armory_skills_tb와 armory_gem_tb를 함께 사용해. 스킬 정보에 해당 스킬의 보석 이름 목록(gems)을 jsonb_agg(g.name)으로 포함시켜.
             - PROFILE(단순 레벨 조회 시) : character_level과 item_avg_level을 반드시 함께 SELECT.
 
             {few_shots}
 
-            [약어 힌트 - 질문 속 약어와 정식 명칭 매핑]
+            [용어 힌트 - 질문 속 표현과 DB 정식 명칭 매핑]
             {abbr_hints}
-            ※ 약어 힌트는 참고용임. 문맥상 약어가 아닌 일반 단어로 쓰인 경우 무시할 것.
+
+            {term_rules}
 
             [질문]
             {question}
@@ -76,6 +97,7 @@ class SQLGenerator:
                 "error_feedback": f"[이전 시도 오류 - 반드시 수정]\n{error}\n위 오류를 반드시 수정해서 다시 생성해." if error else "",
                 "few_shots": few_shots,
                 "abbr_hints": abbr_hints or "없음",
+                "term_rules": self._build_term_rules(abbr_hints) if abbr_hints else "",
         })
 
         if result is None:

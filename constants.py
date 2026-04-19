@@ -1,3 +1,14 @@
+DISPLAY_TRIGGERS: dict[str, set[str]] = {
+    "SKILL":       {"스킬", "보석"},
+    "ENGRAVING":   {"각인"},
+    "AVATAR":      {"아바타"},
+    "ARK_GRID":    {"아크그리드", "코어"},
+    "ARK_PASSIVE": {"아크패시브", "진화", "깨달음", "도약"},
+    "COLLECTIBLE": {"내실", "수집품"},
+    "PROFILE":     {"장비", "프로필", "능력치"},
+    "EXPEDITION":  {"원정대"},
+}
+
 UI_TABLE_MAP = {
     "SKILL": ["armory_skills_tb", "armory_gem_tb"],
     "ARK_GRID": ["ark_grid_cores_tb", "ark_grid_gems_tb"],

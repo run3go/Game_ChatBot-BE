@@ -6,10 +6,10 @@ from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from core.llm import llm
+from utils.llm import llm, llm_answer, llm_sql
 from database import get_db
 from service.ai_service import AIService
-from service.chat_service import ChatService, generate_title, run_background_save
+from service.chat_service import ChatService, run_background_save
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +36,7 @@ def ask_ai_stream(
         summary = svc.get_summary(chat_id)
         history = ([{"role": "summary", "content": summary}] if summary else []) + recent
 
-    ai_service = AIService(llm, db)
+    ai_service = AIService(llm, db, llm_sql=llm_sql, llm_answer=llm_answer)
     answer_parts: list[str] = []
     structured_result: list = []
     generated_title: list[str] = []
@@ -86,7 +86,7 @@ def ask_ai_stream(
         finally:
             if is_first_message and chat_id and user_id:
                 try:
-                    title = generate_title(question, llm)
+                    title = ChatService.generate_title(question, llm)
                     generated_title.append(title)
                     yield f"data: {json.dumps({'type': 'title', 'content': title})}\n\n"
                 except Exception:
