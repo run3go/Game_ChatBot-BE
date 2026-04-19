@@ -1,10 +1,13 @@
+import time
 from langchain_core.prompts import ChatPromptTemplate
 from output_types import SQLWithUIType, QuestionAnalysis
+from llm.llm_monitor import log_llm_call, TokenCountCallback
 
 class SQLGenerator:
 
     def __init__(self, llm):
         self.llm = llm
+        self.model_name = getattr(llm, "model_name", getattr(llm, "model", "unknown"))
 
     def generate(self, question: str, analysis: QuestionAnalysis, schema, nicknames: list[str] | None = None, error: str | None = None, few_shots: str = "", abbr_hints: str = ""):
         prompt = ChatPromptTemplate.from_template("""
@@ -67,20 +70,63 @@ class SQLGenerator:
         structured_llm = self.llm.with_structured_output(SQLWithUIType)
         chain = (prompt | structured_llm).with_retry(stop_after_attempt=2)
 
+        # 스키마 요약 (로깅용 - 테이블명만)
+        schema_tables = list(schema.keys()) if isinstance(schema, dict) else str(schema)[:200]
 
-        result = chain.invoke({
-                "question": question,
-                "analysis": analysis,
-                "nicknames": nicknames if nicknames else "",
-                "schema": schema,
-                "error_feedback": f"[이전 시도 오류 - 반드시 수정]\n{error}\n위 오류를 반드시 수정해서 다시 생성해." if error else "",
-                "few_shots": few_shots,
+        start_time = time.time()
+        cb = TokenCountCallback()
+        detail = {
+            "input": {
                 "abbr_hints": abbr_hints or "없음",
-        })
+                "schema_tables": schema_tables,
+                "few_shots": few_shots[:300] if few_shots else "없음",
+                "error_feedback": error or "없음",
+            },
+            "output": {},
+        }
 
-        if result is None:
-            raise ValueError("SQL 생성 결과가 없습니다.")
-        return self._clean_sql(result.sql), result.ui_type
+        try:
+            result = chain.invoke({
+                    "question": question,
+                    "analysis": analysis,
+                    "nicknames": nicknames if nicknames else "",
+                    "schema": schema,
+                    "error_feedback": f"[이전 시도 오류 - 반드시 수정]\n{error}\n위 오류를 반드시 수정해서 다시 생성해." if error else "",
+                    "few_shots": few_shots,
+                    "abbr_hints": abbr_hints or "없음",
+            }, config={"callbacks": [cb]})
+
+            if result is None:
+                raise ValueError("SQL 생성 결과가 없습니다.")
+
+            cleaned_sql = self._clean_sql(result.sql)
+
+            detail["output"] = {
+                "sql": cleaned_sql,
+                "ui_type": result.ui_type,
+            }
+
+            log_llm_call(
+                generator_type="sql",
+                model_name=self.model_name,
+                start_time=start_time,
+                callback=cb,
+                detail=detail,
+            )
+
+            return cleaned_sql, result.ui_type
+
+        except Exception as e:
+            log_llm_call(
+                generator_type="sql",
+                model_name=self.model_name,
+                start_time=start_time,
+                callback=cb,
+                success=False,
+                error_message=str(e),
+                detail=detail,
+            )
+            raise
 
     def generate_validated(self, question: str, analysis: QuestionAnalysis, schema: dict, nicknames: list[str] | None = None, few_shots: str = "", all_tables: set | None = None, abbr_hints: str = "") -> str:
         allowed = all_tables if all_tables is not None else set(schema.keys())

@@ -1,9 +1,11 @@
 import json
+import time
 import logging
 from datetime import datetime, date
 from langchain_core.prompts import ChatPromptTemplate
 from utils.chat_utils import format_history
 from game_knowledge import GAME_KNOWLEDGE
+from llm.llm_monitor import log_llm_call, TokenCountCallback
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +18,7 @@ class AnswerGenerator:
 
     def __init__(self, llm):
         self.llm = llm
+        self.model_name = getattr(llm, "model_name", getattr(llm, "model", "unknown"))
 
     def _chain(self, prompt):
         return (prompt | self.llm).with_retry(stop_after_attempt=2)
@@ -23,12 +26,40 @@ class AnswerGenerator:
     def _history(self, history, limit=10) -> str:
         return format_history(history, limit=limit) if history else "없음"
 
-    def _stream(self, chain, inputs: dict, label: str):
+    def _stream_with_monitor(self, chain, inputs: dict, label: str, detail: dict):
+        start_time = time.time()
+        collected_chunks = []
+        cb = TokenCountCallback()
+
         try:
-            for chunk in chain.stream(inputs):
+            for chunk in chain.stream(inputs, config={"callbacks": [cb]}):
+                collected_chunks.append(chunk.content)
                 yield chunk.content
-        except Exception:
+
+            log_llm_call(
+                generator_type="answer",
+                model_name=self.model_name,
+                start_time=start_time,
+                callback=cb,
+                detail={
+                    **detail,
+                    "output": {
+                        "answer_length": sum(len(c) for c in collected_chunks),
+                        "chunk_count": len(collected_chunks),
+                    },
+                },
+            )
+        except Exception as e:
             logger.exception("%s 스트리밍 실패", label)
+            log_llm_call(
+                generator_type="answer",
+                model_name=self.model_name,
+                start_time=start_time,
+                callback=cb,
+                success=False,
+                error_message=str(e),
+                detail=detail,
+            )
             yield "잠시 후 다시 시도해 주세요."
 
     def answer_general(self, question: str, history: list[dict] | None = None):
@@ -47,11 +78,15 @@ class AnswerGenerator:
             [질문]
             {question}
         """)
-        yield from self._stream(self._chain(prompt), {
+        detail = {
+            "input": {"data": "없음 (GENERAL)"},
+            "method": "answer_general",
+        }
+        yield from self._stream_with_monitor(self._chain(prompt), {
             "question": question,
             "history": self._history(history),
             "game_knowledge": GAME_KNOWLEDGE,
-        }, "answer_general")
+        }, "answer_general", detail)
 
     def answer_display(self, question: str, ui_type: str, data: dict, history: list[dict] | None = None):
         prompt = ChatPromptTemplate.from_template("""
@@ -73,12 +108,17 @@ class AnswerGenerator:
             [데이터(JSON)]
             {data}
         """)
-        yield from self._stream(self._chain(prompt), {
+        data_json = json.dumps(data, ensure_ascii=False, default=_json_default)
+        detail = {
+            "input": {"data_size": len(data_json)},
+            "method": "answer_display",
+        }
+        yield from self._stream_with_monitor(self._chain(prompt), {
             "question": question,
             "ui_type": ui_type,
-            "data": json.dumps(data, ensure_ascii=False, default=_json_default),
+            "data": data_json,
             "history": self._history(history),
-        }, "answer_display")
+        }, "answer_display", detail)
 
     def answer(self, question: str, data, history: list[dict] | None = None):
         data = [dict(row) for row in data]
@@ -129,9 +169,17 @@ class AnswerGenerator:
             [데이터(JSON)]
             {data}
         """)
-        yield from self._stream(self._chain(prompt), {
+        data_json = json.dumps(data, ensure_ascii=False, default=_json_default)
+        detail = {
+            "input": {
+                "data_row_count": len(data),
+                "data_size": len(data_json),
+            },
+            "method": "answer",
+        }
+        yield from self._stream_with_monitor(self._chain(prompt), {
             "question": question,
-            "data": json.dumps(data, ensure_ascii=False, default=_json_default),
+            "data": data_json,
             "history": self._history(history),
             "game_knowledge": GAME_KNOWLEDGE,
-        }, "answer")
+        }, "answer", detail)

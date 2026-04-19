@@ -9,5 +9,7 @@ llm = ChatOpenAI(
     openai_api_key=os.getenv("OPENROUTER_API_KEY"),
     openai_api_base="https://openrouter.ai/api/v1",
     default_headers={"X-Title": "LostArk Chatbot"},
+    stream_usage=True,
+    model_kwargs={"stream_options": {"include_usage": True}},
 )
 
