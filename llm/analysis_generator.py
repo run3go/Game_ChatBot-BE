@@ -3,7 +3,15 @@ from langchain_core.prompts import ChatPromptTemplate
 from output_types import QuestionAnalysis
 from game_knowledge import GAME_KNOWLEDGE
 from utils.chat_utils import format_history
+from constants import DISPLAY_TRIGGERS
 from llm.llm_monitor import log_llm_call, TokenCountCallback
+
+
+def _format_display_triggers() -> str:
+    lines = []
+    for category, words in DISPLAY_TRIGGERS.items():
+        lines.append(f"            - {category}: {', '.join(sorted(words))}")
+    return "\n".join(lines)
 
 class AnalysisGenerator:
     def __init__(self, llm):
@@ -33,7 +41,8 @@ class AnalysisGenerator:
         {excluded_nickname_terms}
 
         ⚠️ 닉네임 판별 전 반드시 먼저 확인:
-        - [카테고리 힌트]에 등장하는 모든 약어·정식 명칭은 게임 용어이며 닉네임이 아님. candidates 여부와 무관하게 즉시 제외.
+        - [카테고리 힌트]에 등장하는 모든 단어(- 앞의 단어, 약어 포함)는 게임 용어이며 닉네임이 절대 아님. candidates에 있든 없든, 문장에서 소유격("의") 앞에 오든 무관하게 즉시 제외.
+          예) embedding_context에 "이보크 → SKILL"이 있으면 "이보크의 트라이포드"에서 이보크는 스킬명이지 닉네임이 아님.
         - 클래스·직업명(워로드, 버서커, 소서리스 등) 및 아크패시브 클래스 유형(고독한 기사, 전투 태세 등)과 그 약어는 닉네임이 아님.
 
         - DB에서 찾은 후보 닉네임: {candidates}
@@ -51,26 +60,22 @@ class AnalysisGenerator:
         {game_knowledge}
 
         [response_format]
-        - DISPLAY 판단 방법: 질문에서 닉네임과 단순 요청 표현(보여줘, 알려줘, 뭐야, 뭐가 있어, 뭐있어, 어때, 보여, 줘, 있어, 목록 등)을 제거했을 때 트리거 단어 하나만 남으면 DISPLAY.
+        - DISPLAY 판단 방법: 질문에서 닉네임과 단순 요청 표현(보여줘, 알려줘, 뭐야, 뭐가 있어, 뭐있어, 어때, 보여, 줘, 있어, 목록 등)을 제거했을 때 아래 트리거 단어 목록 중 하나만 남으면 DISPLAY.
           그 외 단어가 하나라도 남으면 DISPLAY가 아님.
-          예) "펜토르 스킬 보여줘" → 제거 후 "스킬" → DISPLAY
+          ⚠️ 트리거 단어는 아래 목록에 있는 단어 그 자체여야 함. 스킬명·각인명·아이템명 등 구체적인 게임 콘텐츠 이름은 트리거 단어가 아님.
+          예) "펜토르 스킬 보여줘" → 제거 후 "스킬" → DISPLAY  ← "스킬"이 트리거 목록에 있음
+              "펜토르 집중 보여줘" → 제거 후 "집중" → DISPLAY 아님  ← "집중"은 스킬 관련 단어이지 트리거 단어가 아님
+              "버프받아가 전설 집중 꼈나?" → 제거 후 "전설 집중" → DISPLAY 아님 → TEXT
               "펜토르 카운터 스킬 뭐야" → 제거 후 "카운터 스킬" → DISPLAY 아님
-              "펜토르 차징 스킬은?" → 제거 후 "차징 스킬" → DISPLAY 아님
           DISPLAY 트리거 단어 전체 목록:
-            - SKILL: 스킬, 보석
-            - ENGRAVING: 각인
-            - AVATAR: 아바타
-            - ARK_GRID: 아크그리드, 코어
-            - ARK_PASSIVE: 아크패시브, 진화, 깨달음, 도약
-            - COLLECTIBLE: 내실, 수집품
-            - PROFILE: 장비, 프로필, 레벨, 능력치
-            - EXPEDITION: 원정대
+{display_triggers}
           ※ 반지·귀걸이·목걸이·장신구는 PROFILE 트리거 단어가 아님. "황로드유 반지가 뭐야?" 같은 질문은 LIST 또는 TEXT로 처리.
         - LIST: 결과가 여러 행(항목)으로 나열되는 상세 조회. 트라이포드·보석 목록처럼 한 스킬/아이템에 딸린 하위 항목이 여럿인 경우.
           예) "다크 리저렉션 트포 알려줘", "배쉬 트라이포드 뭐야?", "리턴 스킬 보석 알려줘"
           ※ DISPLAY는 카테고리 전체 목록, LIST는 특정 항목의 하위 항목 목록.
           ※ 결과가 텍스트 한 줄(효과 설명, 단일 수치 등)이면 LIST가 아니라 TEXT.
-        - COMPARE: 두 명 이상 비교 ("A랑 B 비교해줘"), 또는 동일 캐릭터의 시점 간 변화 비교 ("최근에 바뀐 거 있어?", "트포 바뀐 거 있어?", "이전이랑 달라진 게 있어?")
+        - COMPARE: 두 명 이상 비교 ("A랑 B 비교해줘"), 또는 동일 캐릭터의 시점 간 변화 비교 ("최근에 바뀐 거 있어?", "트포 바뀐 거 있어?", "이전이랑 달라진 게 있어?", "각인 바꾼 적 있어?", "각인 바뀐 거 있어?", "보석 바뀐 거 있어?", "장비 바뀐 게 있어?")
+          ※ "[카테고리 주제] + 바꾼/바뀐/변경/달라진" 패턴은 항상 해당 카테고리 + COMPARE로 분류. PROFILE로 올리지 말 것.
         - COUNT: 단일 개수 ("몇 개야?") — 이전 대화가 COUNT였고 후속 질문이면 COUNT 유지
         - COUNT_LIST: 항목별 개수 목록 ("스킬별 보석 개수는?", "가장 많이 쓰는 ~가 뭐야?", "~별 통계")
         - VALUE: 단순 수치 하나를 묻는 질문. ("전투력이 얼마야?", "리턴 스킬 레벨이 몇이야?")
@@ -92,7 +97,7 @@ class AnalysisGenerator:
         structured_llm = self.llm.with_structured_output(QuestionAnalysis)
         chain = (prompt | structured_llm).with_retry(stop_after_attempt=2)
 
-        history_text = format_history(history) if history else ""
+        history_text = format_history(history, max_ai_length=200) if history else ""
 
         inputs = {
             "question": question,
@@ -101,6 +106,7 @@ class AnalysisGenerator:
             "game_knowledge": GAME_KNOWLEDGE,
             "embedding_context": embedding_context or "없음",
             "excluded_nickname_terms": ", ".join(excluded_nickname_terms) if excluded_nickname_terms else "없음",
+            "display_triggers": _format_display_triggers(),
         }
 
         start_time = time.time()

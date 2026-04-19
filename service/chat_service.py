@@ -104,6 +104,26 @@ class ChatService:
         )
         self.db.commit()
 
+    @staticmethod
+    def generate_title(question: str, llm=None) -> str:
+        if not llm or len(question) <= 10:
+            return question[:10]
+
+        prompt = ChatPromptTemplate.from_template("""
+            다음은 로스트아크 게임 챗봇에 대한 사용자의 첫 질문이야.
+            5~10글자로 간단한 제목을 만들어줘. 마침표나 특수문자는 빼줘.
+
+            [질문]
+            {question}
+        """)
+
+        try:
+            result = (prompt | llm).invoke({"question": question})
+            return result.content.strip()[:50]
+        except Exception:
+            logger.exception("제목 생성 실패, 원본 질문으로 설정")
+            return question[:50]
+
     def set_title_if_empty(self, chat_id: str, title: str):
         self.db.execute(
             text("UPDATE public.chat_sessions_tb SET title = :title WHERE chat_id = :chat_id AND title IS NULL"),
@@ -157,25 +177,6 @@ class ChatService:
         except Exception:
             logger.exception("요약 생성 실패 (chat_id=%s)", chat_id)
 
-
-def generate_title(question: str, llm=None) -> str:
-    if not llm or len(question) <= 10:
-        return question[:10]
-
-    prompt = ChatPromptTemplate.from_template("""
-        다음은 로스트아크 게임 챗봇에 대한 사용자의 첫 질문이야.
-        5~10글자로 간단한 제목을 만들어줘. 마침표나 특수문자는 빼줘.
-
-        [질문]
-        {question}
-    """)
-
-    try:
-        result = (prompt | llm).invoke({"question": question})
-        return result.content.strip()[:50]
-    except Exception:
-        logger.exception("제목 생성 실패, 원본 질문으로 설정")
-        return question[:50]
 
 
 def run_background_save(

@@ -11,7 +11,7 @@ def clean_word(word: str) -> str:
             break
     return word
 
-def format_history(history: list[dict], limit: int = 6) -> str:
+def format_history(history: list[dict], limit: int = 6, max_ai_length: int | None = None) -> str:
     lines = []
     regular = []
     for m in history:
@@ -24,9 +24,11 @@ def format_history(history: list[dict], limit: int = 6) -> str:
             line = f"사용자: {m['content']}"
             if m.get('nicknames'):
                 line += f" [닉네임: {', '.join(m['nicknames'])}]"
-
         else:
-            line = f"AI: {m['content']}"
+            content = m['content']
+            if max_ai_length and len(content) > max_ai_length:
+                content = content[:max_ai_length] + "..."
+            line = f"AI: {content}"
         lines.append(line)
     return "\n".join(lines)
 

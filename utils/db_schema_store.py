@@ -1,28 +1,15 @@
-import os
-from langchain_openai import OpenAIEmbeddings
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+from utils.lazy_embeddings import EmbeddingsMixin
 
 
-class DBSchemaStore:
+class DBSchemaStore(EmbeddingsMixin):
     """
     pgvector 기반 온-디맨드 스키마 검색.
     앱 시작 시 아무것도 로드하지 않고, 요청마다:
       1. 키워드 임베딩 → schema_comments_tb에서 유사 테이블명 검색
       2. 검색된 테이블(2~5개)의 컬럼 정보만 DB에서 조회
     """
-
-    def __init__(self):
-        self._embeddings: OpenAIEmbeddings | None = None
-
-    def _get_embeddings(self) -> OpenAIEmbeddings:
-        if self._embeddings is None:
-            self._embeddings = OpenAIEmbeddings(
-                model="openai/text-embedding-3-small",
-                openai_api_key=os.getenv("OPENROUTER_API_KEY"),
-                openai_api_base="https://openrouter.ai/api/v1",
-            )
-        return self._embeddings
 
     def search(self, db: Session, keywords: list[str], threshold: float = 0.45) -> list[str]:
         seen: set = set()
