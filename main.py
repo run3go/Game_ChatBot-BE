@@ -9,7 +9,7 @@ from fastapi import FastAPI
 
 from fastapi.middleware.cors import CORSMiddleware
 
-from routers import airflow, ask, sessions, users
+from routers import airflow, ask, monitor, sessions, users
 
 logging.basicConfig(
     level=logging.INFO,
@@ -29,7 +29,7 @@ app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "https://gamechatbotfe.vercel.app"],
+    allow_origins=["http://localhost:3001", "https://gamechatbotfe.vercel.app"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -38,3 +38,4 @@ app.include_router(users.router)
 app.include_router(sessions.router)
 app.include_router(ask.router)
 app.include_router(airflow.router)
+app.include_router(monitor.router)

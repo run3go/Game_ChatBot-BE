@@ -1,8 +1,10 @@
+import time
 from langchain_core.prompts import ChatPromptTemplate
 from output_types import QuestionAnalysis
 from game_knowledge import GAME_KNOWLEDGE
 from utils.chat_utils import format_history
 from constants import DISPLAY_TRIGGERS
+from llm.llm_monitor import log_llm_call, TokenCountCallback
 
 
 def _format_display_triggers() -> str:
@@ -14,6 +16,7 @@ def _format_display_triggers() -> str:
 class AnalysisGenerator:
     def __init__(self, llm):
         self.llm = llm
+        self.model_name = getattr(llm, "model_name", getattr(llm, "model", "unknown"))
 
     def analyze(self, question: str, history: list[dict] | None = None, candidates: list[str] | None = None, embedding_context: str = "", excluded_nickname_terms: list[str] | None = None) -> QuestionAnalysis:
 
@@ -96,7 +99,7 @@ class AnalysisGenerator:
 
         history_text = format_history(history, max_ai_length=200) if history else ""
 
-        result = chain.invoke({
+        inputs = {
             "question": question,
             "history": history_text or "없음",
             "candidates": candidates or [],
@@ -104,8 +107,48 @@ class AnalysisGenerator:
             "embedding_context": embedding_context or "없음",
             "excluded_nickname_terms": ", ".join(excluded_nickname_terms) if excluded_nickname_terms else "없음",
             "display_triggers": _format_display_triggers(),
-            })
-        
-        if result is None:
-            raise ValueError("질문 분석 결과가 없습니다.")
-        return result
+        }
+
+        start_time = time.time()
+        cb = TokenCountCallback()
+        detail = {
+            "input": {
+                "embedding_context": embedding_context or "없음",
+                "candidates": candidates or [],
+            },
+            "output": {},
+        }
+
+        try:
+            result = chain.invoke(inputs, config={"callbacks": [cb]})
+
+            if result is None:
+                raise ValueError("질문 분석 결과가 없습니다.")
+
+            detail["output"] = {
+                "nicknames": result.nicknames,
+                "response_format": result.response_format,
+                "category": result.category,
+                "reason": result.reason,
+            }
+
+            log_llm_call(
+                generator_type="analysis",
+                model_name=self.model_name,
+                start_time=start_time,
+                callback=cb,
+                detail=detail,
+            )
+            return result
+
+        except Exception as e:
+            log_llm_call(
+                generator_type="analysis",
+                model_name=self.model_name,
+                start_time=start_time,
+                callback=cb,
+                success=False,
+                error_message=str(e),
+                detail=detail,
+            )
+            raise
