@@ -1,7 +1,7 @@
 from typing import Optional
 from fastapi import APIRouter, Query
 from llm.llm_monitor import monitor
-from core.llm import llm
+from utils.llm import llm
 
 router = APIRouter(prefix="/monitor", tags=["monitor"])
 
