@@ -10,7 +10,7 @@ from llm.embedding_lookup_retriever import EMBEDDING_LOOKUP
 from utils.chat_utils import extract_nicknames
 from service.nickname_service import validate_nicknames_batch
 from service.populator import DataPopulator
-from constants import UI_TABLE_MAP, CHARACTER_TYPES, DISPLAY_TRIGGERS
+from constants import UI_TABLE_MAP, CHARACTER_TYPES, DISPLAY_TRIGGERS, POSTPOSITIONS
 from output_types import QuestionAnalysis
 
 logger = logging.getLogger(__name__)
@@ -51,13 +51,22 @@ class AIService:
             q = question
             for nick in (analysis.nicknames or []):
                 q = q.replace(nick, "")
-            remaining = set(q.split()) - _REQUEST_WORDS - {""}
+            remaining = set(q.split()) - _REQUEST_WORDS - set(POSTPOSITIONS) - {""}
             triggers = DISPLAY_TRIGGERS.get(analysis.category, set())
             if not (remaining and remaining <= triggers):
                 analysis.response_format = "TEXT"
 
         nicknames, unverified = self._resolve_nicknames(candidates, analysis.nicknames)
         yield "nicknames", nicknames
+
+        if unverified and not nicknames:
+            nickname = unverified[0]
+            yield "result", {
+                "ui_type": "CONFIRM_COLLECT",
+                "nickname": nickname,
+                "message": f"'{nickname}' 캐릭터 정보가 존재하지 않습니다. 데이터를 수집할까요? (예/아니오)",
+            }
+            return
 
         if not nicknames and analysis.category in _GLOBALIZABLE:
             analysis.category = "GLOBAL_" + analysis.category
@@ -71,21 +80,11 @@ class AIService:
 
         if requires_nickname and not nicknames:
             # LLM이 닉네임을 못 찾았을 때 히스토리에서 명시적으로 상속
-            if not unverified:
-                inherited = self._get_last_nickname_from_history(history)
-                if inherited:
-                    nicknames = inherited
-            # 상속 후에도 없으면 사용자에게 요청
-            if not nicknames:
-                if unverified:
-                    nickname = unverified[0]
-                    yield "result", {
-                        "ui_type": "CONFIRM_COLLECT",
-                        "nickname": nickname,
-                        "message": f"'{nickname}' 캐릭터 정보가 존재하지 않습니다. 데이터를 수집할까요? (예/아니오)",
-                    }
-                else:
-                    yield "result", ["어떤 캐릭터에 대해 알고 싶으신가요? 닉네임을 알려주세요!"]
+            inherited = self._get_last_nickname_from_history(history)
+            if inherited:
+                nicknames = inherited
+            else:
+                yield "result", ["어떤 캐릭터에 대해 알고 싶으신가요? 닉네임을 알려주세요!"]
                 return
 
         yield "status", "데이터를 조회하는 중이에요..."

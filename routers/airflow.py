@@ -1,7 +1,9 @@
+import logging
 from fastapi import APIRouter, HTTPException
 
 from service.airflow_service import AirflowManager, CharacterRequest
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 _airflow = AirflowManager()
 
@@ -19,6 +21,7 @@ async def update_character_data(req: CharacterRequest):
     except HTTPException:
         raise
     except Exception as e:
+        logger.exception("trigger-update 실패")
         raise HTTPException(status_code=500, detail=str(e))
 
 
