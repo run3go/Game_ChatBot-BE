@@ -18,7 +18,7 @@ class AnalysisGenerator:
         self.llm = llm
         self.model_name = getattr(llm, "model_name", getattr(llm, "model", "unknown"))
 
-    def analyze(self, question: str, history: list[dict] | None = None, candidates: list[str] | None = None, embedding_context: str = "", excluded_nickname_terms: list[str] | None = None) -> QuestionAnalysis:
+    def analyze(self, question: str, history: list[dict] | None = None, candidates: list[str] | None = None, embedding_context: str = "") -> QuestionAnalysis:
 
         prompt = ChatPromptTemplate.from_template("""
         너는 로스트아크 질문 분석기야.
@@ -28,6 +28,7 @@ class AnalysisGenerator:
         - 닉네임 있음 → SKILL / ENGRAVING / ARK_PASSIVE / ARK_GRID / COLLECTIBLE / PROFILE / AVATAR
         - 닉네임 없음 → GLOBAL_SKILL / GLOBAL_ENGRAVING / GLOBAL_ARK_PASSIVE / GLOBAL_ARK_GRID / GLOBAL_PROFILE
         ⚠️ candidates가 비어있지 않으면 embedding_context 결과와 무관하게 반드시 GLOBAL_이 아닌 카테고리를 사용해야 함.
+        ⚠️ 치명타 비율·신속 비율·스탯 분포("치신 비율", "치명 얼마나", "신속 비율") 질문은 아크패시브 관련 질문처럼 보여도 반드시 GLOBAL_PROFILE로 분류. stat_crit·stat_swift 같은 스탯 수치는 armory_profile_tb에 있으므로 GLOBAL_ARK_PASSIVE로 분류하면 잘못된 테이블을 조회하게 됨.
 
         힌트 없는 특수 케이스:
         - TOTAL_INFO: 닉네임만 있고 카테고리 힌트 없는 포괄적 요청
@@ -37,9 +38,6 @@ class AnalysisGenerator:
         - GENERAL: 인사·일반 대화, 게임 시스템 개념 설명 (DB 조회 불필요). 특정 데이터 조회가 필요하면 GLOBAL_*로 분류.
 
         [닉네임 추출]
-        ⚠️ 아래 단어들은 클래스·직업명이므로 절대 닉네임이 아님. candidates에 있더라도 제외:
-        {excluded_nickname_terms}
-
         ⚠️ 닉네임 판별 전 반드시 먼저 확인:
         - [카테고리 힌트]에 등장하는 모든 단어(- 앞의 단어, 약어 포함)는 게임 용어이며 닉네임이 절대 아님. candidates에 있든 없든, 문장에서 소유격("의") 앞에 오든 무관하게 즉시 제외.
           예) embedding_context에 "이보크 → SKILL"이 있으면 "이보크의 트라이포드"에서 이보크는 스킬명이지 닉네임이 아님.
@@ -50,6 +48,7 @@ class AnalysisGenerator:
         - 후보가 없으면(candidates=[]) 질문의 단어는 게임 용어일 가능성이 높음. nicknames=[]. 이전 대화에서도 닉네임을 찾을 것.
         - 현재 질문에 닉네임이 없으면 반드시 이전 대화를 확인해서 가장 최근에 언급된 닉네임 하나만 가져와. 후속 질문("작열은?", "그럼 스킬은?", "다른 건?")은 항상 이전 대화의 닉네임을 이어받아야 해. 그래도 없으면 []
         - 히스토리에 닉네임이 여러 개 있어도, 현재 질문에 닉네임이 명시되지 않았다면 반드시 가장 마지막에 언급된 닉네임 하나만 반환해. 절대 히스토리의 여러 닉네임을 모두 담지 마.
+        - ⚠️ 단, 현재 질문에서 두 캐릭터를 명시적으로 비교("A와 B 비교", "A랑 B 차이")하는 경우 두 닉네임을 모두 반환해. candidates에 두 닉네임이 모두 있으면 둘 다 선택해야 함.
         - nicknames가 비어있지 않으면 category는 반드시 GLOBAL_이 아닌 쪽으로 분류. GLOBAL_*와 닉네임은 절대 함께 올 수 없음.
         - nicknames=[]이면 category는 GLOBAL_*로 분류.
 
@@ -77,6 +76,7 @@ class AnalysisGenerator:
         - COMPARE: 두 명 이상 비교 ("A랑 B 비교해줘"), 또는 동일 캐릭터의 시점 간 변화 비교 ("최근에 바뀐 거 있어?", "트포 바뀐 거 있어?", "이전이랑 달라진 게 있어?", "각인 바꾼 적 있어?", "각인 바뀐 거 있어?", "보석 바뀐 거 있어?", "장비 바뀐 게 있어?")
           ※ "[카테고리 주제] + 바꾼/바뀐/변경/달라진" 패턴은 항상 해당 카테고리 + COMPARE로 분류. PROFILE로 올리지 말 것.
         - COUNT: 단일 개수 ("몇 개야?") — 이전 대화가 COUNT였고 후속 질문이면 COUNT 유지
+          ⚠️ "성장은 빠른 편인가?", "성장 속도가 어떻게 돼?", "성장 추이" 같은 질문은 COUNT가 아니라 TEXT. 데이터 포인트 개수가 아니라 시계열 변화를 보여줘야 함.
         - COUNT_LIST: 항목별 개수 목록 ("스킬별 보석 개수는?", "가장 많이 쓰는 ~가 뭐야?", "~별 통계")
         - VALUE: 단순 수치 하나를 묻는 질문. ("전투력이 얼마야?", "리턴 스킬 레벨이 몇이야?")
           "가장 높은/낮은 ~가 뭐야?", "어떤 ~?" 처럼 특정 대상(행/스킬/아이템)을 찾는 질문은 VALUE가 아니라 GLOBAL_*.
@@ -105,7 +105,6 @@ class AnalysisGenerator:
             "candidates": candidates or [],
             "game_knowledge": GAME_KNOWLEDGE,
             "embedding_context": embedding_context or "없음",
-            "excluded_nickname_terms": ", ".join(excluded_nickname_terms) if excluded_nickname_terms else "없음",
             "display_triggers": _format_display_triggers(),
         }
 

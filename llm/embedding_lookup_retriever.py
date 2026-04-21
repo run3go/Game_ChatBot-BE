@@ -21,9 +21,10 @@ class EmbeddingLookupRetriever(EmbeddingsMixin):
         """LLM으로 질문에서 게임 용어 키워드만 추출."""
         try:
             result = self._get_llm().invoke(
-                f'로스트아크 게임 용어 키워드만 쉼표로 추출해. 조사·부사·동사·일반어는 제외.\n"{question}"'
+                f'로스트아크 게임 용어 키워드만 쉼표로 추출해. 조사·부사·동사·일반어는 제외.\n"{question}"',
+                max_tokens=64,
             )
-            keywords = [k.strip() for k in result.content.split(",") if k.strip()]
+            keywords = [k.strip() for k in result.content.split(",") if k.strip()][:10]
         except Exception:
             logger.exception("embedding_lookup 키워드 추출 실패, 질문 전체 사용")
             keywords = [question]
@@ -164,6 +165,32 @@ class EmbeddingLookupRetriever(EmbeddingsMixin):
                 continue
             terms.extend(self._get_abbrs(entry))
         return terms
+
+    def _find_match_in_question(self, question: str, entry: dict) -> str | None:
+        """질문에서 이 entry와 매칭되는 텍스트 반환 (formal_name 포함)."""
+        formal_name = entry.get("formal_name", "")
+        for abbr in self._get_abbrs(entry):
+            if abbr in question:
+                return abbr
+        normalized = formal_name.replace(" ", "")
+        if normalized != formal_name and normalized in question:
+            return normalized
+        if formal_name in question:
+            return formal_name
+        return None
+
+    def filter_subsumed(self, question: str, entries: list[dict]) -> list[dict]:
+        """질문에서 매칭된 텍스트가 다른 entry의 더 긴 매칭 텍스트의 부분 문자열인 entry를 제거.
+        예: '버스트'(ARK_PASSIVE_CLASS)가 '버스트 캐넌'(SKILL) 안에 포함되면 제거."""
+        matched = {e["formal_name"]: self._find_match_in_question(question, e) for e in entries}
+        matched_texts = {t for t in matched.values() if t}
+        result = []
+        for entry in entries:
+            m = matched[entry["formal_name"]]
+            if m and any(m != longer and m in longer for longer in matched_texts):
+                continue
+            result.append(entry)
+        return result
 
     def format_term_hints(self, question: str, entries: list[dict]) -> str:
         """embedding 검색으로 찾은 모든 정식 명칭을 힌트로 반환. 질문에서 매칭된 표현이 있으면 '매칭어→정식명', 없으면 정식명만 출력."""

@@ -11,7 +11,7 @@ _base = dict(
 )
 
 # 분석용
-llm = ChatOpenAI(model="meta-llama/llama-3.3-70b-instruct:groq", **_base)
+llm = ChatOpenAI(model="openai/gpt-4o-mini", **_base)
 
 # 답변 생성용 (스트리밍 속도 우선)
 llm_answer = ChatOpenAI(model="openai/gpt-4o-mini", **_base)
