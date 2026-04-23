@@ -11,6 +11,8 @@ from utils.chat_utils import extract_nicknames
 from service.nickname_service import validate_nicknames_batch
 from service.populator import DataPopulator
 from constants import UI_TABLE_MAP, CHARACTER_TYPES, DISPLAY_TRIGGERS, POSTPOSITIONS
+
+_CHARACTER_DATA_TYPES = CHARACTER_TYPES - {"MARKET_ITEMS", "AUCTION_ITEMS"}
 from output_types import QuestionAnalysis
 
 logger = logging.getLogger(__name__)
@@ -141,6 +143,12 @@ class AIService:
                 )
         else:
             yield "result", result
+
+        if nicknames and analysis.category in _CHARACTER_DATA_TYPES:
+            tables = UI_TABLE_MAP.get(analysis.category, [])
+            collected_at = self.populator.get_max_collected_at(nicknames[0], tables)
+            if collected_at:
+                yield "data_updated_at", collected_at
 
     def _normalize_for_retrieval(self, question: str, nicknames: list[str]) -> str:
         normalized = question

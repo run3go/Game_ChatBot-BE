@@ -58,6 +58,8 @@ def ask_ai_stream(
                     resolved_nicknames[:] = event_data
                 elif event_type == "sql":
                     generated_sql[:] = [event_data]
+                elif event_type == "data_updated_at":
+                    yield f"data: {json.dumps({'type': 'data_updated_at', 'value': event_data})}\n\n"
         except Exception:
             yield f"data: {json.dumps({'type': 'error', 'content': '잠시 후 다시 시도해 주세요.'})}\n\n"
             yield "data: [DONE]\n\n"
