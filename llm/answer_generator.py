@@ -14,6 +14,12 @@ def _json_default(obj):
         return obj.isoformat()
     return float(obj)
 
+def _strip_datetime_to_date(data: list[dict]) -> list[dict]:
+    return [
+        {k: v.date() if isinstance(v, datetime) else v for k, v in row.items()}
+        for row in data
+    ]
+
 class AnswerGenerator:
 
     def __init__(self, llm):
@@ -120,8 +126,10 @@ class AnswerGenerator:
             "history": self._history(history),
         }, "answer_display", detail)
 
-    def answer(self, question: str, data, history: list[dict] | None = None):
+    def answer(self, question: str, data, history: list[dict] | None = None, category: str = ""):
         data = [dict(row) for row in data]
+        if category in {"MARKET", "AUCTION"}:
+            data = _strip_datetime_to_date(data)
 
         prompt = ChatPromptTemplate.from_template("""
             너는 로스트아크 AI 비서야.
@@ -160,6 +168,7 @@ class AnswerGenerator:
             - 분석 과정/필터링 기준 설명 금지
             - 처음부터 해당 데이터만 존재했던 것처럼 담백하게 출력
             - 응답을 코드블록(```)으로 감싸지 마. 마크다운을 직접 출력.
+            - 가격·수치 단위는 항상 "골드"로 표시. "원" 사용 금지.
 
             [이전 대화]
             {history}

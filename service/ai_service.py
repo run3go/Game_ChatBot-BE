@@ -1,4 +1,5 @@
 import logging
+import re
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy import text
 from utils.db_schema_store import DB_SCHEMA_STORE
@@ -10,9 +11,10 @@ from llm.embedding_lookup_retriever import EMBEDDING_LOOKUP
 from utils.chat_utils import extract_nicknames
 from service.nickname_service import validate_nicknames_batch
 from service.populator import DataPopulator
-from constants import UI_TABLE_MAP, CHARACTER_TYPES, DISPLAY_TRIGGERS, POSTPOSITIONS
+from utils.auction_option_resolver import resolve as resolve_auction_options
+from constants import UI_TABLE_MAP, CHARACTER_TYPES, DISPLAY_TRIGGERS, POSTPOSITIONS, NICKNAME_BLACKLIST
 
-_CHARACTER_DATA_TYPES = CHARACTER_TYPES - {"MARKET_ITEMS", "AUCTION_ITEMS"}
+_CHARACTER_DATA_TYPES = CHARACTER_TYPES - {"MARKET", "AUCTION"}
 from output_types import QuestionAnalysis
 
 logger = logging.getLogger(__name__)
@@ -104,7 +106,7 @@ class AIService:
             yield "result", self.answer_generator.answer_general(question, history)
             return
 
-        requires_nickname = analysis.category in CHARACTER_TYPES
+        requires_nickname = analysis.category in (CHARACTER_TYPES - {"MARKET", "AUCTION"})
 
         if requires_nickname and not nicknames:
             # LLM이 닉네임을 못 찾았을 때 히스토리에서 명시적으로 상속
@@ -133,7 +135,7 @@ class AIService:
         if isinstance(result, dict):
             result['nicknames'] = analysis.nicknames
             yield "result", result
-            if result.get("ui_type") != "TOTAL_INFO":
+            if result.get("ui_type") not in {"TOTAL_INFO", "MARKET", "AUCTION"}:
                 yield "status", "답변을 생성하는 중이에요..."
                 yield "result_text", self.answer_generator.answer_display(
                     question,
@@ -147,6 +149,11 @@ class AIService:
         if nicknames and analysis.category in _CHARACTER_DATA_TYPES:
             tables = UI_TABLE_MAP.get(analysis.category, [])
             collected_at = self.populator.get_max_collected_at(nicknames[0], tables)
+            if collected_at:
+                yield "data_updated_at", collected_at
+        elif analysis.category in {"MARKET", "AUCTION"}:
+            tables = UI_TABLE_MAP.get(analysis.category, [])
+            collected_at = self.populator.get_max_collected_at_global(tables)
             if collected_at:
                 yield "data_updated_at", collected_at
 
@@ -171,7 +178,7 @@ class AIService:
         if not llm_nicknames:
             return [], []
         confirmed = [c for c in candidates if c in llm_nicknames]
-        unvalidated = [n for n in llm_nicknames if n not in candidates]
+        unvalidated = [n for n in llm_nicknames if n not in candidates and n not in NICKNAME_BLACKLIST and ' ' not in n]
         if unvalidated:
             verified, unverified = validate_nicknames_batch(self.db, unvalidated)
             return confirmed + verified, unverified
@@ -199,7 +206,10 @@ class AIService:
                     seen_tables.add(t)
                     priority_tables.append(t)
 
-        _add_tables(DB_SCHEMA_STORE.search(self.db, [analysis.category]))
+        if analysis.category in {"MARKET", "AUCTION"}:
+            _add_tables(UI_TABLE_MAP.get(analysis.category, []))
+        else:
+            _add_tables(DB_SCHEMA_STORE.search(self.db, [analysis.category]))
         if lookup_entries:
             for entry in lookup_entries:
                 _add_tables(entry.get("related_tables", []))
@@ -209,20 +219,26 @@ class AIService:
         retrieval_query += f" {analysis.category} {analysis.response_format}"
         few_shots = FEW_SHOT_STORE.retrieve(self.db, retrieval_query, category=analysis.category)
         all_tables = DB_SCHEMA_STORE.get_all_tables(self.db)
-        sql = self.sql_generator.generate_validated(question, analysis, schema, nicknames, few_shots=few_shots, all_tables=all_tables, abbr_hints=abbr_hints)
+        auction_conditions = resolve_auction_options(question) if analysis.category == "AUCTION" else ""
+        logger.info("[auction_conditions] category=%s resolved=%r", analysis.category, auction_conditions)
+        sql = self.sql_generator.generate_validated(question, analysis, schema, nicknames, few_shots=few_shots, all_tables=all_tables, abbr_hints=abbr_hints, auction_conditions=auction_conditions)
 
-        result = self._execute_sql(sql, question, analysis, schema, nicknames, few_shots=few_shots)
+        result = self._execute_sql(sql, question, analysis, schema, nicknames, few_shots=few_shots, auction_conditions=auction_conditions)
         if result is None:
             return ["해당 정보를 찾지 못했어요. 질문을 좀 더 구체적으로 해주시면 더 잘 답변드릴 수 있어요."], sql
         if result == []:
             if analysis.response_format == "COMPARE":
                 return ["변경된 기록이 없습니다."], sql
+            if analysis.category in {"MARKET", "AUCTION"}:
+                return ["해당 아이템을 찾을 수 없어요. 아이템명을 정확히 입력해주세요."], sql
             if analysis.category.startswith("GLOBAL_"):
                 return ["해당 정보가 데이터베이스에 없어요."], sql
             return ["조건에 맞는 데이터가 없어요."], sql
-        return self.answer_generator.answer(question, result, history), sql
+        if analysis.category in {"MARKET", "AUCTION"} and analysis.response_format == "LIST":
+            return {"ui_type": analysis.category, "data": [dict(r) for r in result]}, sql
+        return self.answer_generator.answer(question, result, history, category=analysis.category), sql
 
-    def _execute_sql(self, sql: str, question: str, analysis: QuestionAnalysis, schema, nicknames: list, few_shots: str = ""):
+    def _execute_sql(self, sql: str, question: str, analysis: QuestionAnalysis, schema, nicknames: list, few_shots: str = "", auction_conditions: str = ""):
         for attempt in range(2):
             try:
                 return self.db.execute(text(sql)).mappings().all()
@@ -234,4 +250,5 @@ class AIService:
                     question, analysis, schema, nicknames,
                     error=f"SQL 실행 오류: {str(e.orig)}",
                     few_shots=few_shots,
+                    auction_conditions=auction_conditions,
                 )

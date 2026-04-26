@@ -40,7 +40,7 @@ class SQLGenerator:
             return ""
         return "[용어 치환 힌트 - 문맥에 맞게 참고]\n" + "\n".join(all_rules)
 
-    def generate(self, question: str, analysis: QuestionAnalysis, schema, nicknames: list[str] | None = None, error: str | None = None, few_shots: str = "", abbr_hints: str = ""):
+    def generate(self, question: str, analysis: QuestionAnalysis, schema, nicknames: list[str] | None = None, error: str | None = None, few_shots: str = "", abbr_hints: str = "", auction_conditions: str = ""):
         prompt = ChatPromptTemplate.from_template("""
             너는 로스트아크 DB 전문가야.
 
@@ -73,6 +73,10 @@ class SQLGenerator:
             - COMPARE(강화 시점 탐지 - "재련 시점", "언제 강화", "몇 강 찍은 시점"): LAG(honing_level) OVER (PARTITION BY type ORDER BY collected_at)로 이전값과 비교해서 값이 바뀐 collected_at을 강화 시점으로 반환해. armory_equipment_tb 사용. ⚠️ 이 때 CTE에서 MAX(collected_at) 단일 시점을 쓰면 LAG 비교 대상이 없어 결과가 항상 비어버림. 반드시 기간 조건(collected_at >= NOW() - INTERVAL '...')으로 전체 이력을 가져온 뒤 LAG 적용할 것.
 
             [category별 SQL 규칙]
+            - MARKET: market_items_tb만 사용. character_name 조건 절대 금지. 최신 시점 조회 시 WHERE name = '...' 조건과 함께 MAX(collected_at)를 사용하는 WITH latest_market CTE 패턴 사용. 시세 추이(기간 조회) 시 날짜별 MAX(collected_at)로 일 1건 추출. 1개당 단가 계산 시 current_min_price / bundle_count 사용.
+            - AUCTION: 기본적으로 auction_items_tb만 사용. character_name 조건 절대 금지. 즉시구매가 조회 시 buy_price > 0 조건 포함. options JSONB 필터링 시 (options->>'옵션명')::numeric 캐스팅 사용.
+              반드시 collected_at = (SELECT MAX(collected_at) FROM lostark.auction_items_tb) 조건으로 최신 스냅샷만 조회해. end_date > CURRENT_TIMESTAMP 조건은 추가하지 마.
+              ⚠️ 닉네임이 있고 "장착한 아이템의 시세"를 묻는 경우: armory_equipment_tb를 CTE로 먼저 사용해 해당 캐릭터의 장착 아이템 옵션·품질을 추출한 뒤, 그 값 기준으로 auction_items_tb에서 유사 매물을 검색해. 이때만 armory_equipment_tb 사용이 허용되며, [유사 예시] 패턴을 반드시 참고해.
             ⚠️ GLOBAL_* 카테고리 공통: character_name 조건으로 특정 유저 지정 절대 금지.
             - GLOBAL_SKILL: [스키마]에 있는 테이블 자유롭게 사용. 전체 유저 집계 시 armory_skills_tb 등 캐릭터 테이블 사용 가능. ⚠️ 특정 스킬/룬 통계 집계 시 GROUP BY 또는 집계 함수 전후로 skill_name·rune_name·rune_grade 필터 조건이 반드시 메인 쿼리에 있어야 함. 누락 시 전체 스킬/룬 데이터가 집계되는 오류 발생.
             - GLOBAL_ARK_PASSIVE: [스키마]에 있는 테이블 자유롭게 사용. 전체 유저 집계 시 ark_passive_effects_tb 등 캐릭터 테이블 사용 가능.
@@ -109,6 +113,8 @@ class SQLGenerator:
             [스키마]
             {schema}
 
+            {auction_option_hint}
+
         """)
 
         structured_llm = self.llm.with_structured_output(SQLWithUIType)
@@ -139,6 +145,12 @@ class SQLGenerator:
                     "few_shots": few_shots,
                     "abbr_hints": abbr_hints or "없음",
                     "term_rules": self._build_term_rules(abbr_hints) if abbr_hints else "",
+                    "auction_option_hint": (
+                        f"[경매장 옵션 조건 - 최우선 적용]\n"
+                        f"아래 조건을 WHERE절에 글자 하나도 바꾸지 말고 그대로 복사해서 포함해.\n"
+                        f"{auction_conditions}\n"
+                        f"⚠️ 위 조건 대신 다른 옵션명이나 수치를 임의로 사용하는 것은 절대 금지."
+                    ) if auction_conditions else "",
             }, config={"callbacks": [cb]})
 
             if result is None:
@@ -173,18 +185,18 @@ class SQLGenerator:
             )
             raise
 
-    def generate_validated(self, question: str, analysis: QuestionAnalysis, schema: dict, nicknames: list[str] | None = None, few_shots: str = "", all_tables: set | None = None, abbr_hints: str = "") -> str:
+    def generate_validated(self, question: str, analysis: QuestionAnalysis, schema: dict, nicknames: list[str] | None = None, few_shots: str = "", all_tables: set | None = None, abbr_hints: str = "", auction_conditions: str = "") -> str:
         allowed = all_tables if all_tables is not None else set(schema.keys())
 
         def _check_invalid(sql: str) -> set:
             return {re.sub(r'\W', '', w.split(".")[-1]) for w in sql.split() if "lostark." in w} - allowed
 
-        sql, _ = self.generate(question, analysis, schema, nicknames, few_shots=few_shots, abbr_hints=abbr_hints)
+        sql, _ = self.generate(question, analysis, schema, nicknames, few_shots=few_shots, abbr_hints=abbr_hints, auction_conditions=auction_conditions)
         invalid = _check_invalid(sql)
         if not invalid:
             return sql
 
-        sql, _ = self.generate(question, analysis, schema, nicknames, few_shots=few_shots, abbr_hints=abbr_hints,
+        sql, _ = self.generate(question, analysis, schema, nicknames, few_shots=few_shots, abbr_hints=abbr_hints, auction_conditions=auction_conditions,
                                error=f"허용되지 않은 테이블 사용: {invalid}. 반드시 [스키마]에 있는 테이블만 사용해.")
         invalid = _check_invalid(sql)
         if invalid:

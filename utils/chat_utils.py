@@ -1,6 +1,6 @@
 import re
 from service.nickname_service import validate_nicknames_batch
-from constants import POSTPOSITIONS, STOPWORDS
+from constants import POSTPOSITIONS, STOPWORDS, NICKNAME_BLACKLIST
 
 def clean_word(word: str) -> str:
     for p in sorted(POSTPOSITIONS, key=len, reverse=True):
@@ -48,7 +48,7 @@ def extract_nicknames(db, question: str) -> list[str]:
         if cleaned != w and cleaned not in seen and cleaned not in STOPWORDS:
             word_to_cleaned[w] = cleaned
 
-    to_check = list(ordered) + list(word_to_cleaned.values())
+    to_check = [w for w in list(ordered) + list(word_to_cleaned.values()) if w not in NICKNAME_BLACKLIST]
     verified, _ = validate_nicknames_batch(db, to_check)
     verified_set = set(verified)
 

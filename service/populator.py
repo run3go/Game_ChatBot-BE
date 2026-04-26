@@ -143,6 +143,18 @@ class DataPopulator:
         ]
         return data
 
+    def get_max_collected_at_global(self, tables: list) -> str | None:
+        valid_tables = [t for t in tables if t in _ALLOWED_TABLES]
+        if not valid_tables:
+            return None
+        try:
+            row = self.db.execute(
+                text(f"SELECT MAX(collected_at) FROM lostark.{valid_tables[0]}"),
+            ).first()
+            return row[0].isoformat() + "Z" if row and row[0] else None
+        except Exception:
+            return None
+
     def get_max_collected_at(self, nickname: str, tables: list) -> str | None:
         valid_tables = [t for t in tables if t in _ALLOWED_TABLES]
         if not valid_tables:

@@ -4,6 +4,7 @@ from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException
 from fastapi.responses import StreamingResponse
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from utils.llm import llm, llm_answer, llm_sql
@@ -35,6 +36,21 @@ def ask_ai_stream(
         is_first_message = len(recent) == 0
         summary = svc.get_summary(chat_id)
         history = ([{"role": "summary", "content": summary}] if summary else []) + recent
+
+    if user_id:
+        row = db.execute(
+            text("""
+                UPDATE public.user_info_tb
+                SET remaining_call_count = remaining_call_count + 1
+                WHERE user_id = :user_id AND remaining_call_count < 50
+                RETURNING remaining_call_count
+            """),
+            {"user_id": user_id},
+        ).first()
+        db.commit()
+
+        if row is None:
+            raise HTTPException(status_code=429, detail="오늘의 질문 횟수를 모두 사용했어요.")
 
     ai_service = AIService(llm, db, llm_sql=llm_sql, llm_answer=llm_answer)
     answer_parts: list[str] = []

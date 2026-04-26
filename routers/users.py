@@ -24,6 +24,18 @@ def register_user(
     return {"user_id": user_id}
 
 
+@router.get("/users/call-count")
+def get_call_count(
+    user_id: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    row = db.execute(
+        text("SELECT remaining_call_count FROM public.user_info_tb WHERE user_id = :user_id"),
+        {"user_id": user_id},
+    ).first()
+    return {"call_count": row[0] if row else 0}
+
+
 @router.get("/users/recent-nickname")
 def get_recent_nickname(
     user_id: str = Query(...),
