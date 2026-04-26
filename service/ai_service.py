@@ -135,14 +135,6 @@ class AIService:
         if isinstance(result, dict):
             result['nicknames'] = analysis.nicknames
             yield "result", result
-            if result.get("ui_type") not in {"TOTAL_INFO", "MARKET", "AUCTION"}:
-                yield "status", "답변을 생성하는 중이에요..."
-                yield "result_text", self.answer_generator.answer_display(
-                    question,
-                    result.get("ui_type", ""),
-                    result.get("data", {}),
-                    history,
-                )
         else:
             yield "result", result
 
