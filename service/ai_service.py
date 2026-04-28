@@ -81,10 +81,19 @@ class AIService:
             q = question
             for nick in (analysis.nicknames or []):
                 q = q.replace(nick, "")
-            remaining = set(q.split()) - _REQUEST_WORDS - set(POSTPOSITIONS) - {""}
-            triggers = DISPLAY_TRIGGERS.get(analysis.category, set())
-            if not (remaining and remaining <= triggers):
-                analysis.response_format = "TEXT"
+            words = set(q.split()) - _REQUEST_WORDS - set(POSTPOSITIONS) - {""}
+            all_triggers = {w for s in DISPLAY_TRIGGERS.values() for w in s}
+
+            # "정보"만 남은 경우 → LLM이 PROFILE 등으로 잘못 분류했을 때 TOTAL_INFO로 보정
+            if words == {"정보"} and analysis.category != "TOTAL_INFO":
+                analysis.category = "TOTAL_INFO"
+
+            # "정보" + 다른 트리거 조합 → "정보"는 요청어 취급, LLM이 TOTAL_INFO로 잘못 분류했으면 보정
+            if "정보" in words and (words - {"정보"}) & all_triggers and analysis.category == "TOTAL_INFO":
+                for cat, trigs in DISPLAY_TRIGGERS.items():
+                    if cat != "TOTAL_INFO" and (words - {"정보"}) & trigs:
+                        analysis.category = cat
+                        break
 
         nicknames, unverified = self._resolve_nicknames(candidates, analysis.nicknames)
         yield "nicknames", nicknames
