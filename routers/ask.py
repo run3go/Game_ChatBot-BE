@@ -3,6 +3,7 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -89,7 +90,7 @@ def ask_ai_stream(
                 yield f"data: {json.dumps({'type': 'confirm_collect', 'nickname': result['nickname']})}\n\n"
             elif isinstance(result, dict):
                 structured_result.append(result)
-                yield f"data: {json.dumps({'type': 'structured', 'payload': result})}\n\n"
+                yield f"data: {json.dumps({'type': 'structured', 'payload': jsonable_encoder(result)})}\n\n"
                 for chunk in result_text or []:
                     if chunk:
                         answer_parts.append(chunk)
