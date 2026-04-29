@@ -12,14 +12,13 @@ from utils.chat_utils import extract_nicknames
 from service.nickname_service import validate_nicknames_batch
 from service.populator import DataPopulator
 from utils.auction_option_resolver import resolve as resolve_auction_options
-from constants import UI_TABLE_MAP, CHARACTER_TYPES, DISPLAY_TRIGGERS, POSTPOSITIONS, NICKNAME_BLACKLIST
+from constants import UI_TABLE_MAP, CHARACTER_TYPES, DISPLAY_TRIGGERS, POSTPOSITIONS, NICKNAME_BLACKLIST, DISPLAY_STRIP_WORDS
 
 _CHARACTER_DATA_TYPES = CHARACTER_TYPES - {"MARKET", "AUCTION"}
 from output_types import QuestionAnalysis
 
 logger = logging.getLogger(__name__)
 
-_REQUEST_WORDS = {"보여줘", "알려줘", "뭐야", "뭐가", "있어", "뭐있어", "어때", "보여", "줘", "목록", "뭐", "알려"}
 
 
 _GLOBALIZABLE = {"SKILL", "ENGRAVING", "ARK_PASSIVE", "ARK_GRID", "PROFILE"}
@@ -77,13 +76,21 @@ class AIService:
         filtered_entries = EMBEDDING_LOOKUP.filter_subsumed(question, filtered_entries)
         abbr_hints = EMBEDDING_LOOKUP.format_term_hints(question, filtered_entries)
 
-        if analysis.response_format == "DISPLAY":
-            q = question
-            for nick in (analysis.nicknames or []):
-                q = q.replace(nick, "")
-            words = set(q.split()) - _REQUEST_WORDS - set(POSTPOSITIONS) - {""}
-            all_triggers = {w for s in DISPLAY_TRIGGERS.values() for w in s}
+        q = question
+        for nick in (analysis.nicknames or []):
+            q = q.replace(nick, "")
+        words = set(q.split()) - DISPLAY_STRIP_WORDS - set(POSTPOSITIONS) - {""}
+        all_triggers = {w for s in DISPLAY_TRIGGERS.values() for w in s}
 
+        if analysis.response_format not in {"DISPLAY", "COMPARE"}:
+            if words and words <= all_triggers and len(words) == 1:
+                analysis.response_format = "DISPLAY"
+                for cat, trigs in DISPLAY_TRIGGERS.items():
+                    if words & trigs:
+                        analysis.category = cat
+                        break
+
+        if analysis.response_format == "DISPLAY":
             # "정보"만 남은 경우 → LLM이 PROFILE 등으로 잘못 분류했을 때 TOTAL_INFO로 보정
             if words == {"정보"} and analysis.category != "TOTAL_INFO":
                 analysis.category = "TOTAL_INFO"
@@ -222,7 +229,7 @@ class AIService:
         all_tables = DB_SCHEMA_STORE.get_all_tables(self.db)
         auction_conditions = resolve_auction_options(question) if analysis.category == "AUCTION" else ""
         logger.info("[auction_conditions] category=%s resolved=%r", analysis.category, auction_conditions)
-        sql = self.sql_generator.generate_validated(question, analysis, schema, nicknames, few_shots=few_shots, all_tables=all_tables, abbr_hints=abbr_hints, auction_conditions=auction_conditions)
+        sql = self.sql_generator.generate_validated(question, analysis, schema, nicknames, few_shots=few_shots, all_tables=all_tables, abbr_hints=abbr_hints, auction_conditions=auction_conditions, history=history)
 
         result = self._execute_sql(sql, question, analysis, schema, nicknames, few_shots=few_shots, auction_conditions=auction_conditions)
         if result is None:

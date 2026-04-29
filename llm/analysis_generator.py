@@ -31,6 +31,8 @@ class AnalysisGenerator:
           예) candidates=["첫번째도구"], nicknames=["첫번째도구"] → category=SKILL (GLOBAL_SKILL ❌)
               "닉네임을 언급하며 스킬을 물어봤으므로 GLOBAL_SKILL" 같은 추론은 완전히 잘못된 것. 닉네임이 있으면 GLOBAL_ 절대 불가.
         ⚠️ 치명타 비율·신속 비율·스탯 분포("치신 비율", "치명 얼마나", "신속 비율") 질문은 아크패시브 관련 질문처럼 보여도 반드시 GLOBAL_PROFILE로 분류. stat_crit·stat_swift 같은 스탯 수치는 armory_profile_tb에 있으므로 GLOBAL_ARK_PASSIVE로 분류하면 잘못된 테이블을 조회하게 됨.
+        ⚠️ 질문에 "보석"이 포함되고 가격·시세 키워드가 없으면 → 반드시 SKILL. "장착한 보석", "끼고 있는 보석", "다른 보석", "보석 개수" 등 어떤 수식이 붙어도 SKILL. PROFILE로 분류 금지.
+          예) "황로드유가 장착한 다른 보석 개수" → SKILL, "끼고 있는 보석이 뭐야" → SKILL
 
         힌트 없는 특수 케이스:
         - TOTAL_INFO: 닉네임만 있고 카테고리 힌트 없는 포괄적 요청
@@ -55,6 +57,7 @@ class AnalysisGenerator:
           예) "황로드유가 장착한 유물 각인 중 남은 레벨을 올리는 데 비용이 가장 적게 드는 게 뭐야?" → MARKET (각인서 가격 조회, 보석 무관)
         ⚠️ 가격, 시세같은 키워드가 포함된 질문은 닉네임이 있어도 MARKET 또는 AUCTION으로 분류. PROFILE·SKILL 등으로 분류 금지.
         - GENERAL: 인사·일반 대화, 게임 시스템 개념 설명 (DB 조회 불필요). 특정 데이터 조회가 필요하면 GLOBAL_*로 분류.
+          ⚠️ 직업명·아크패시브 클래스 등 구체적인 집계 기준 없이 막연하게 "어떤 스킬이 있어?", "스킬 목록 보여줘" 같은 질문은 GLOBAL_*가 아니라 GENERAL로 분류. 특정 집계 기준(직업, 아크패시브 클래스, 각인 조합 등)이 명시돼야 GLOBAL_*가 될 수 있음.
 
         [닉네임 추출]
         ⚠️ 닉네임 판별 전 반드시 먼저 확인:

@@ -3,6 +3,7 @@ import time
 from langchain_core.prompts import ChatPromptTemplate
 from output_types import SQLWithUIType, QuestionAnalysis
 from llm.llm_monitor import log_llm_call, TokenCountCallback
+from utils.chat_utils import format_history
 
 class SQLGenerator:
 
@@ -40,7 +41,7 @@ class SQLGenerator:
             return ""
         return "[용어 치환 힌트 - 문맥에 맞게 참고]\n" + "\n".join(all_rules)
 
-    def generate(self, question: str, analysis: QuestionAnalysis, schema, nicknames: list[str] | None = None, error: str | None = None, few_shots: str = "", abbr_hints: str = "", auction_conditions: str = ""):
+    def generate(self, question: str, analysis: QuestionAnalysis, schema, nicknames: list[str] | None = None, error: str | None = None, few_shots: str = "", abbr_hints: str = "", auction_conditions: str = "", history: list[dict] | None = None):
         prompt = ChatPromptTemplate.from_template("""
             너는 로스트아크 DB 전문가야.
 
@@ -49,6 +50,7 @@ class SQLGenerator:
             - 테이블 접두사는 lostark.를 사용해.
             - 동적 테이블(collected_at 존재): 단일 캐릭터 조회 시 WITH step00 AS (SELECT MAX(collected_at) AS recent_collect_time FROM ... WHERE character_name = '닉네임') 패턴으로 최신 시점을 구해.
             - 동적 테이블에서 유저 필터링 시(전체 유저 포함): 반드시 character_name별 MAX(collected_at)로 최신 시점을 먼저 구한 뒤 조인해서 필터링. 예) ark_passive_effects_tb에서 특정 패시브 보유 유저 추출 시 latest_passives CTE 선행 필수.
+            - ⚠️ 전체 유저 집계 시 여러 동적 테이블을 조인하는 경우: 필터용 테이블뿐 아니라 집계 대상 테이블에도 반드시 character_name별 MAX(collected_at) CTE를 적용해.
             - 정적 테이블(collected_at 없음, 예: lostark_skill_tripod): WITH 절 없이 바로 조회해.
             - 동점자 포함 상위 N개: ORDER BY ... DESC FETCH FIRST 1 ROWS WITH TIES.
             - 교집합 없는 데이터 추출: NOT EXISTS.
@@ -62,9 +64,9 @@ class SQLGenerator:
             {error_feedback}
 
             [response_format별 SQL 규칙]
-            - COUNT: COUNT(*) 단일 값만 반환. AS 별칭은 의미 있게 지정.
+            - COUNT: 동적 테이블 조회 시 WITH step00 패턴으로 최신 시점을 구한 뒤 COUNT(*) 단일 값만 반환. AS 별칭은 의미 있게 지정.
             - COUNT_LIST: GROUP BY + COUNT(*). 전체 유저 통계 시 character_name별 MAX(collected_at)로 최신 시점을 구한 뒤 조인.
-            - VALUE: SUM·AVG 등 단일 집계 수치 하나만 반환. 절대 행 전체를 반환하지 마.
+            - VALUE: 동적 테이블 조회 시 WITH step00 패턴으로 최신 시점을 구한 뒤 SUM·AVG 등 단일 집계 수치 하나만 반환. 절대 행 전체를 반환하지 마.
             - TEXT / DISPLAY / LIST: 동적 테이블 조회 시 WITH step00 패턴으로 최신 시점을 구한 뒤 조건에 맞는 행을 반환. 정적 테이블(collected_at 없음, 예: lostark_skill_tripod)만 조회하는 경우 WITH 절 없이 바로 조회해.
               "가장 높은/낮은 ~가 뭐야?" 처럼 특정 대상(행)을 찾는 질문은 ORDER BY ... DESC FETCH FIRST 1 ROWS WITH TIES로 행을 반환해. MAX() 단독으로 집계 수치만 반환하면 어떤 대상인지 알 수 없으므로 절대 금지.
             - COMPARE(캐릭터 간): 캐릭터별로 WITH latest_캐릭터명 AS (SELECT MAX(collected_at) AS recent_collect_time FROM ... WHERE character_name = '캐릭터명') CTE를 각각 구성. FROM 절 없이 캐릭터별 서브쿼리를 컬럼으로 분리하고 json_build_object로 캡슐화. AS "캐릭터명_data". to_jsonb(row) 및 to_jsonb(s.*) 사용 금지 — 반드시 명시적 컬럼으로 구성.
@@ -76,8 +78,11 @@ class SQLGenerator:
             - MARKET: market_items_tb만 사용. character_name 조건 절대 금지. 최신 시점 조회 시 WHERE name = '...' 조건과 함께 MAX(collected_at)를 사용하는 WITH latest_market CTE 패턴 사용. 시세 추이(기간 조회) 시 날짜별 MAX(collected_at)로 일 1건 추출. 1개당 단가 계산 시 current_min_price / bundle_count 사용.
             - AUCTION: 기본적으로 auction_items_tb만 사용. character_name 조건 절대 금지. 즉시구매가 조회 시 buy_price > 0 조건 포함. options JSONB 필터링 시 (options->>'옵션명')::numeric 캐스팅 사용.
               반드시 collected_at = (SELECT MAX(collected_at) FROM lostark.auction_items_tb) 조건으로 최신 스냅샷만 조회해. end_date > CURRENT_TIMESTAMP 조건은 추가하지 마.
+              ⚠️ 장신구(반지·귀걸이·목걸이·팔찌) 조회 시 "3티어" 언급이 따로 없으면 반드시 tier = 4 조건을 포함해. tier = 3 사용 절대 금지.
               ⚠️ 닉네임이 있고 "장착한 아이템의 시세"를 묻는 경우: armory_equipment_tb를 CTE로 먼저 사용해 해당 캐릭터의 장착 아이템 옵션·품질을 추출한 뒤, 그 값 기준으로 auction_items_tb에서 유사 매물을 검색해. 이때만 armory_equipment_tb 사용이 허용되며, [유사 예시] 패턴을 반드시 참고해.
             ⚠️ GLOBAL_* 카테고리 공통: character_name 조건으로 특정 유저 지정 절대 금지.
+            ⚠️ GLOBAL_* + 동적 테이블(collected_at 존재) 조회 시: 반드시 직업명·아크패시브 클래스 등 의미 있는 WHERE 필터 또는 GROUP BY 집계를 포함해야 함. 필터·집계 없이 캐릭터 테이블 전체를 SELECT하거나 개별 캐릭터 행을 raw로 반환하는 쿼리는 절대 생성 금지.
+              정적 테이블(collected_at 없음, 예: lostark_skill_tripod, engrave)은 이 제한 없이 자유롭게 조회 가능.
             - GLOBAL_SKILL: [스키마]에 있는 테이블 자유롭게 사용. 전체 유저 집계 시 armory_skills_tb 등 캐릭터 테이블 사용 가능. ⚠️ 특정 스킬/룬 통계 집계 시 GROUP BY 또는 집계 함수 전후로 skill_name·rune_name·rune_grade 필터 조건이 반드시 메인 쿼리에 있어야 함. 누락 시 전체 스킬/룬 데이터가 집계되는 오류 발생.
             - GLOBAL_ARK_PASSIVE: [스키마]에 있는 테이블 자유롭게 사용. 전체 유저 집계 시 ark_passive_effects_tb 등 캐릭터 테이블 사용 가능.
             - GLOBAL_ARK_GRID: [스키마]에 있는 테이블 자유롭게 사용. 전체 유저 집계 시 캐릭터 테이블 사용 가능.
@@ -97,6 +102,10 @@ class SQLGenerator:
             {abbr_hints}
 
             {term_rules}
+
+            [이전 대화 - 후속 질문 맥락 파악용]
+            {history}
+            ※ "다른", "나머지", "그 외" 같은 표현이 있으면 이전 대화에서 언급된 조건·분류를 제외하는 조건을 SQL에 반영해.
 
             [질문]
             {question}
@@ -141,6 +150,7 @@ class SQLGenerator:
                     "analysis": analysis,
                     "nicknames": ", ".join(nicknames) if nicknames else "없음",
                     "schema": schema,
+                    "history": format_history(history, limit=4, max_ai_length=150) if history else "없음",
                     "error_feedback": f"[이전 시도 오류 - 반드시 수정]\n{error}\n위 오류를 반드시 수정해서 다시 생성해." if error else "",
                     "few_shots": few_shots,
                     "abbr_hints": abbr_hints or "없음",
@@ -185,18 +195,18 @@ class SQLGenerator:
             )
             raise
 
-    def generate_validated(self, question: str, analysis: QuestionAnalysis, schema: dict, nicknames: list[str] | None = None, few_shots: str = "", all_tables: set | None = None, abbr_hints: str = "", auction_conditions: str = "") -> str:
+    def generate_validated(self, question: str, analysis: QuestionAnalysis, schema: dict, nicknames: list[str] | None = None, few_shots: str = "", all_tables: set | None = None, abbr_hints: str = "", auction_conditions: str = "", history: list[dict] | None = None) -> str:
         allowed = all_tables if all_tables is not None else set(schema.keys())
 
         def _check_invalid(sql: str) -> set:
             return {re.sub(r'\W', '', w.split(".")[-1]) for w in sql.split() if "lostark." in w} - allowed
 
-        sql, _ = self.generate(question, analysis, schema, nicknames, few_shots=few_shots, abbr_hints=abbr_hints, auction_conditions=auction_conditions)
+        sql, _ = self.generate(question, analysis, schema, nicknames, few_shots=few_shots, abbr_hints=abbr_hints, auction_conditions=auction_conditions, history=history)
         invalid = _check_invalid(sql)
         if not invalid:
             return sql
 
-        sql, _ = self.generate(question, analysis, schema, nicknames, few_shots=few_shots, abbr_hints=abbr_hints, auction_conditions=auction_conditions,
+        sql, _ = self.generate(question, analysis, schema, nicknames, few_shots=few_shots, abbr_hints=abbr_hints, auction_conditions=auction_conditions, history=history,
                                error=f"허용되지 않은 테이블 사용: {invalid}. 반드시 [스키마]에 있는 테이블만 사용해.")
         invalid = _check_invalid(sql)
         if invalid:
