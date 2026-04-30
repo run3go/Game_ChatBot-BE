@@ -2,7 +2,7 @@ import json
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 from sqlalchemy import text
@@ -19,7 +19,8 @@ router = APIRouter()
 
 
 @router.post("/ask/stream")
-def ask_ai_stream(
+async def ask_ai_stream(
+    request: Request,
     background_tasks: BackgroundTasks,
     question: str = Body(...),
     chat_id: Optional[str] = Body(default=None),
@@ -60,11 +61,14 @@ def ask_ai_stream(
     resolved_nicknames: list[str] = []
     generated_sql: list[str] = []
 
-    def generate():
+    async def generate():
         result = None
         result_text = None
         try:
             for event_type, event_data in ai_service.ask(question, history):
+                if await request.is_disconnected():
+                    logger.info("클라이언트 연결 끊김 (chat_id=%s)", chat_id)
+                    return
                 if event_type == "status":
                     yield f"data: {json.dumps({'type': 'status', 'content': event_data})}\n\n"
                 elif event_type == "result":
@@ -78,6 +82,7 @@ def ask_ai_stream(
                 elif event_type == "data_updated_at":
                     yield f"data: {json.dumps({'type': 'data_updated_at', 'value': event_data})}\n\n"
         except Exception:
+            logger.exception("SSE 스트리밍 오류 (chat_id=%s)", chat_id)
             yield f"data: {json.dumps({'type': 'error', 'content': '잠시 후 다시 시도해 주세요.'})}\n\n"
             yield "data: [DONE]\n\n"
             return
@@ -101,6 +106,7 @@ def ask_ai_stream(
                         answer_parts.append(chunk)
                         yield f"data: {json.dumps({'type': 'text', 'content': chunk})}\n\n"
         except Exception:
+            logger.exception("결과 직렬화 오류 (chat_id=%s)", chat_id)
             yield f"data: {json.dumps({'type': 'error', 'content': '잠시 후 다시 시도해 주세요.'})}\n\n"
         finally:
             if is_first_message and chat_id and user_id:

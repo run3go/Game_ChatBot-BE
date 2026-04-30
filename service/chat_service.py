@@ -1,6 +1,7 @@
 import uuid
 import json
 import logging
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from langchain_core.prompts import ChatPromptTemplate
@@ -86,7 +87,7 @@ class ChatService:
                 "chat_id": chat_id,
                 "role": role,
                 "content": content,
-                "result_json": json.dumps(result_json) if result_json is not None else None,
+                "result_json": json.dumps(jsonable_encoder(result_json)) if result_json is not None else None,
                 "nicknames": nicknames if nicknames else None,
                 "sql_query": sql_query,
             },
@@ -193,16 +194,31 @@ def run_background_save(
     db = SessionLocal()
     try:
         svc = ChatService(db)
-        svc.save_message(chat_id, "user", question, nicknames=nicknames)
-        answer_text = "".join(answer_parts)
-        result_json = structured_result[0] if structured_result else None
-        sql_query = generated_sql[0] if generated_sql else None
-        if answer_text or result_json:
-            svc.save_message(chat_id, "assistant", answer_text, result_json, sql_query=sql_query)
-        if is_first_message and generated_title:
-            svc.set_title_if_empty(chat_id, generated_title[0])
-        svc.update_summary(chat_id, llm)
-    except Exception:
-        logger.exception("백그라운드 메시지 저장 실패 (chat_id=%s)", chat_id)
+
+        try:
+            svc.save_message(chat_id, "user", question, nicknames=nicknames)
+        except Exception:
+            logger.exception("유저 메시지 저장 실패 (chat_id=%s)", chat_id)
+
+        try:
+            answer_text = "".join(answer_parts)
+            result_json = structured_result[0] if structured_result else None
+            sql_query = generated_sql[0] if generated_sql else None
+            if answer_text or result_json:
+                svc.save_message(chat_id, "assistant", answer_text, result_json, sql_query=sql_query)
+        except Exception:
+            logger.exception("어시스턴트 메시지 저장 실패 (chat_id=%s)", chat_id)
+
+        try:
+            if is_first_message and generated_title:
+                svc.set_title_if_empty(chat_id, generated_title[0])
+        except Exception:
+            logger.exception("제목 저장 실패 (chat_id=%s)", chat_id)
+
+        try:
+            svc.update_summary(chat_id, llm)
+        except Exception:
+            logger.exception("요약 업데이트 실패 (chat_id=%s)", chat_id)
+
     finally:
         db.close()
