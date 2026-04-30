@@ -39,6 +39,7 @@ _CATEGORY_SUBJECT_TYPES: dict[str, set[str]] = {
     "PROFILE":            {"PROFILE", "CARD"},
     "GLOBAL_PROFILE":     {"PROFILE", "CARD"},
     "COLLECTIBLE":        {"COLLECTIBLE"},
+    "MARKET":             {"ENGRAVING"},
 }
 
 class AIService:
