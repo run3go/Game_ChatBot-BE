@@ -129,8 +129,10 @@ class AIService:
         requires_nickname = analysis.category in (CHARACTER_TYPES - {"MARKET", "AUCTION"})
 
         if requires_nickname and not nicknames:
-            # LLM이 닉네임을 못 찾았을 때 히스토리에서 명시적으로 상속
-            inherited = self._get_last_nickname_from_history(history)
+            # 순수 후속 질문(트리거·조사·요청어만 남는 짧은 질문)일 때만 히스토리 닉네임 상속.
+            # 트리거 외 미인식 단어가 있으면 엉뚱한 질문으로 판단해 상속 금지.
+            unknown_words = words - all_triggers
+            inherited = self._get_last_nickname_from_history(history) if not unknown_words else []
             if inherited:
                 nicknames = inherited
             else:
