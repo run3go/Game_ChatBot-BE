@@ -81,6 +81,10 @@ class SQLGenerator:
               ⚠️ 장신구(반지·귀걸이·목걸이·팔찌) 조회 시 "3티어" 언급이 따로 없으면 반드시 tier = 4 조건을 포함해. tier = 3 사용 절대 금지.
               ⚠️ 닉네임이 있고 "장착한 아이템의 시세"를 묻는 경우: armory_equipment_tb를 CTE로 먼저 사용해 해당 캐릭터의 장착 아이템 옵션·품질을 추출한 뒤, 그 값 기준으로 auction_items_tb에서 유사 매물을 검색해. 이때만 armory_equipment_tb 사용이 허용되며, [유사 예시] 패턴을 반드시 참고해.
               ⚠️ 닉네임이 있고 "장착한 보석의 시세/가격/비용"을 묻는 경우: armory_gem_tb.name에는 '광휘' 접두사가 붙지만(예: '광휘 작열') auction_items_tb.name에는 '광휘'가 없음(예: '작열'). 반드시 armory_gem_tb CTE에서 REPLACE(name, '광휘', '작열') AS mapped_name으로 변환한 뒤 auction_items_tb와 조인해.
+              ⚠️ 보석(item_type = '보석') 조회 시:
+              - 보석 레벨(예: 8레벨, 10레벨)은 name 컬럼에 포함됨 → 반드시 name LIKE '%8레벨%' 형태로 사용. grade·level 등 다른 컬럼에 레벨 값을 넣는 것은 절대 금지.
+              - grade 컬럼은 아이템 희귀도(고대·유물·전설 등)를 나타냄. 질문에 grade/등급을 명시하지 않으면 grade 조건을 절대 추가하지 마.
+              - 특정 보석 종류(작열, 홍염 등)를 명시하지 않고 레벨·티어만 묻는 경우: 반드시 GROUP BY A.name으로 보석 종류별 결과를 반환하고 A.name, MIN(A.buy_price) AS min_price, ROUND(AVG(A.buy_price)) AS avg_price, COUNT(A.id) AS item_count를 함께 SELECT해.
             ⚠️ GLOBAL_* 카테고리 공통: character_name 조건으로 특정 유저 지정 절대 금지.
             ⚠️ GLOBAL_* + 동적 테이블(collected_at 존재) 조회 시: 반드시 직업명·아크패시브 클래스 등 의미 있는 WHERE 필터 또는 GROUP BY 집계를 포함해야 함. 필터·집계 없이 캐릭터 테이블 전체를 SELECT하거나 개별 캐릭터 행을 raw로 반환하는 쿼리는 절대 생성 금지.
               정적 테이블(collected_at 없음, 예: lostark_skill_tripod, engrave)은 이 제한 없이 자유롭게 조회 가능.
