@@ -20,6 +20,16 @@ class AnalysisGenerator:
 
     def analyze(self, question: str, history: list[dict] | None = None, candidates: list[str] | None = None, embedding_context: str = "") -> QuestionAnalysis:
 
+        # 최초 질문이고 '000'이 포함된 경우 재질문 유도
+        if "000" in question and (history is None or len(history) == 0):
+            return QuestionAnalysis(
+                nicknames=[],
+                response_format="TEXT",
+                category="GENERAL",
+                reason="최초 질문에 '000' 플레이스홀더가 포함되어 재질문을 유도",
+                reask_message="000을 닉네임으로 채워 다시 질문해주세요."
+            )
+
         prompt = ChatPromptTemplate.from_template("""
         너는 로스트아크 질문 분석기야.
 

@@ -65,6 +65,10 @@ class AIService:
             yield "result", ["잠시 후 다시 시도해 주세요."]
             return
 
+        if analysis.reask_message:
+            yield "result", [analysis.reask_message]
+            return
+
         if analysis.nicknames and excluded_nickname_terms:
             analysis.nicknames = [n for n in analysis.nicknames if n not in excluded_nickname_terms]
 

@@ -8,6 +8,7 @@ class QuestionAnalysis(BaseModel):
                     "TRADING", "SKILL", "ENGRAVING", "AVATAR", "ARK_GRID", "ARK_PASSIVE",
                     "COLLECTIBLE", "PROFILE", "TOTAL_INFO", "EXPEDITION", "MARKET", "AUCTION"] = Field(description="질문 카테고리")
   reason: str = Field(description="response_format의 선정 이유")
+  reask_message: str | None = Field(description="재질문 유도 메시지 (필요 시)")
 
 class SQLWithUIType(BaseModel):
   sql: str = Field(description="생성된 SQL 쿼리 (SQL만, 설명 없이)")
