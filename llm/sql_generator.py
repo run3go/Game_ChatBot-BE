@@ -119,7 +119,7 @@ class SQLGenerator:
                     "analysis": analysis.dict() if hasattr(analysis, 'dict') else analysis,
                     "nicknames": ", ".join(nicknames) if nicknames else "없음",
                     "schema": schema,
-                    "history": format_history(history, limit=4) if history else "없음",
+                    "history": format_history(history, limit=4, include_sql=True) if history else "없음",
                     "error_feedback": f"[이전 시도 오류]\n{error}" if error else "",
                     "few_shots": few_shots,
                     "abbr_hints": abbr_hints or "없음",

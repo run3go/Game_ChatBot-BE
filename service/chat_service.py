@@ -60,8 +60,8 @@ class ChatService:
     def get_recent_messages(self, chat_id: str) -> list[dict]:
         rows = self.db.execute(
             text("""
-                SELECT role, content, result_json, nicknames FROM (
-                    SELECT role, content, result_json, nicknames, created_at
+                SELECT role, content, result_json, nicknames, sql_query FROM (
+                    SELECT role, content, result_json, nicknames, sql_query, created_at
                     FROM public.chat_messages_tb
                     WHERE chat_id = :chat_id
                     ORDER BY created_at DESC
@@ -70,7 +70,7 @@ class ChatService:
             """),
             {"chat_id": chat_id, "limit": HISTORY_LIMIT},
         ).mappings().all()
-        return [{"role": r["role"], "content": r["content"], "result_json": r["result_json"], "nicknames": r["nicknames"]} for r in rows]
+        return [{"role": r["role"], "content": r["content"], "result_json": r["result_json"], "nicknames": r["nicknames"], "sql_query": r["sql_query"]} for r in rows]
 
     def get_summary(self, chat_id: str) -> str | None:
         row = self.db.execute(

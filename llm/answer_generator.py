@@ -4,7 +4,7 @@ import logging
 from datetime import datetime, date
 from langchain_core.prompts import ChatPromptTemplate
 from utils.chat_utils import format_history
-from game_knowledge import GAME_KNOWLEDGE
+from prompts.game_knowledge import GAME_KNOWLEDGE
 from llm.llm_monitor import log_llm_call, TokenCountCallback
 
 logger = logging.getLogger(__name__)

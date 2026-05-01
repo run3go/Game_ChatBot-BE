@@ -33,7 +33,7 @@ async def lifespan(app: FastAPI):
     pm = PromptManager()
 
     sql_gen = SQLGenerator(llm=llms["sql"], prompt_manager=pm)
-    analysis_gen = AnalysisGenerator(llm=llms["analyze"])
+    analysis_gen = AnalysisGenerator(llm=llms["analyze"], prompt_manager=pm)
     answer_gen = AnswerGenerator(llm=llms["answer"])
 
     from llm.embedding_lookup_retriever import EMBEDDING_LOOKUP

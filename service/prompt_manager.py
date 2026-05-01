@@ -7,6 +7,7 @@ class PromptManager:
         self.base = self._load_yaml("base.yaml")
         self.formats = self._load_yaml("formats.yaml")
         self.global_rules = self._load_yaml("global.yaml")
+        self.analysis = self._load_yaml("analysis.yaml")
 
     def _load_yaml(self, file_name: str):
         path = self.root / file_name
@@ -19,6 +20,25 @@ class PromptManager:
         except Exception as e:
             print(f"YAML 로드 실패 ({file_name}): {e}")
             return {}
+
+    def build_analysis_template(self) -> str:
+        """AnalysisGenerator에 주입할 프롬프트 템플릿 문자열 반환"""
+        a = self.analysis
+        return (
+            "너는 로스트아크 질문 분석기야.\n\n"
+            f"{a.get('category_rules', '')}\n"
+            "[카테고리 힌트 - embedding 검색 결과]\n"
+            "{embedding_context}\n\n"
+            "[게임 지식]\n"
+            "{game_knowledge}\n\n"
+            f"{a.get('response_format_rules', '')}\n"
+            f"{a.get('nickname_rules', '')}\n"
+            f"{a.get('followup_rules', '')}\n"
+            "[이전 대화]\n"
+            "{history}\n\n"
+            "[사용자 질문]\n"
+            "{question}"
+        )
 
     def build_sql_rules(self, category: str, response_format: str):
         """SQLGenerator에 주입할 핵심 규칙 세트를 반환"""

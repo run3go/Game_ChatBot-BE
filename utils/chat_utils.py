@@ -11,7 +11,9 @@ def clean_word(word: str) -> str:
             break
     return word
 
-def format_history(history: list[dict], limit: int = 6, max_ai_length: int | None = None) -> str:
+def format_history(history: list[dict] | None, limit: int = 6, max_ai_length: int | None = None, include_sql: bool = False) -> str:
+    if not history:
+        return ""
     lines = []
     regular = []
     for m in history:
@@ -29,6 +31,8 @@ def format_history(history: list[dict], limit: int = 6, max_ai_length: int | Non
             if max_ai_length and len(content) > max_ai_length:
                 content = content[:max_ai_length] + "..."
             line = f"AI: {content}"
+            if include_sql and m.get('sql_query'):
+                line += f"\n[이전 SQL: {m['sql_query']}]"
         lines.append(line)
     return "\n".join(lines)
 
