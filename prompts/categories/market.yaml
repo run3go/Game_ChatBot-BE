@@ -1,0 +1,33 @@
+category_name: "MARKET"
+
+# 1. 기본 제약 및 계산 규칙
+base_rules: |
+  - 테이블: `lostark.market_items_tb`만 사용.
+  - 단가 계산: current_min_price / bundle_count.
+
+# 2. 시세 추이 조회 패턴 (핵심 로직)
+trend_analysis_pattern: |
+  - 시세 추이(기간 조회) 요청 시, 반드시 일별 최신 스냅샷을 먼저 구하는 아래 CTE 구조를 따른다.
+  - [필수 패턴]:
+    WITH daily_latest AS (
+        SELECT MAX(collected_at) AS max_at
+        FROM lostark.market_items_tb
+        WHERE {item_conditions} AND collected_at >= NOW() - INTERVAL '{N} days'
+        GROUP BY DATE(collected_at)
+    )
+    SELECT collected_at, current_min_price,
+           current_min_price - LAG(current_min_price) OVER (ORDER BY collected_at) AS price_diff
+    FROM lostark.market_items_tb
+    WHERE {item_conditions} AND collected_at IN (SELECT max_at FROM daily_latest)
+    ORDER BY collected_at ASC
+
+# 3. 각인서 특화 규칙
+engraving_rules: |
+  - [약어 변환]: 유각(유물), 전각(전설)으로 grade를 매핑한다.
+  - [검색 패턴]: 정확 매칭(=) 대신 반드시 `ILIKE '%{핵심어}%'` 패턴을 사용한다.
+  - [필터 구성]: `WHERE item_type = '각인서' AND grade = '{등급}' AND name ILIKE '%{각인명}%'`
+    * 각인명은 '유각', '전각' 등의 단어를 제거한 순수 각인 이름만 추출하여 검색한다.
+
+# 4. 최신 시점 조회
+latest_price_pattern: |
+  - 일반적인 최신가 조회 시, 아이템 조건과 함께 `MAX(collected_at)`를 사용하는 WITH 절(latest_market)을 선행.

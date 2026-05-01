@@ -1,0 +1,13 @@
+category_name: "AUCTION"
+
+rules: |
+  - buy_price > 0 (즉시구매가 존재) 조건 포함.
+  - 장신구(반지/귀걸이/목걸이/팔찌) 조회 시 "3티어" 언급 없으면 반드시 tier = 4 고정.
+  - [캐릭터가 장착한 보석의 시세] armory_gem_tb의 name에 '광휘'가 포함된 경우, effect_type_name이 '재사용 대기시간 감소'라면 '작열', '피해 증가'라면 '겁화'로 치환.
+  - [캐릭터가 장착한 악세사리(반지, 귀걸이, 목걸이)의 시세] armory_equipment_tb에서 아이템의 옵션·품질을 추출한 뒤, 그 값을 기준으로 auction_items_tb에서 유사 매물을 검색.
+
+  - [보석 조회]
+    - [레벨] 보석 레벨은 반드시 `name LIKE '%N레벨%'` 패턴을 사용해. grade나 level 컬럼에 레벨 숫자를 넣는 것은 금지.
+    - [등급 필터] `grade` 컬럼은 아이템 희귀도(고대/유물/전설)를 의미. 질문에 '고대', '유물' 등의 등급 명시가 없다면 `grade` 조건은 생략해.
+    - [종류 미지정 시 집계] 겁화/작열 등 종류를 명시하지 않고 레벨/티어만 물을 경우, 반드시 `GROUP BY A.name`을 적용하여 보석 종류별로 결과를 반환하라.
+      * SELECT 절 필수 포함: A.name, MIN(A.buy_price) AS min_price, ROUND(AVG(A.buy_price)) AS avg_price, COUNT(A.id) AS item_count

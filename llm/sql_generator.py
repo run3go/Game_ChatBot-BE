@@ -3,13 +3,14 @@ import time
 from langchain_core.prompts import ChatPromptTemplate
 from output_types import SQLWithUIType, QuestionAnalysis
 from llm.llm_monitor import log_llm_call, TokenCountCallback
-from llm.sql_rules import COMMON_RULES, RESPONSE_FORMAT_RULES, get_category_rules
 from utils.chat_utils import format_history
+from service.prompt_manager import PromptManager
 
 class SQLGenerator:
 
-    def __init__(self, llm):
+    def __init__(self, llm, prompt_manager: PromptManager):
         self.llm = llm
+        self.pm = prompt_manager
         self.model_name = getattr(llm, "model_name", getattr(llm, "model", "unknown"))
 
     @staticmethod
@@ -43,55 +44,65 @@ class SQLGenerator:
         return "[용어 치환 힌트 - 문맥에 맞게 참고]\n" + "\n".join(all_rules)
 
     def generate(self, question: str, analysis: QuestionAnalysis, schema, nicknames: list[str] | None = None, error: str | None = None, few_shots: str = "", abbr_hints: str = "", auction_conditions: str = "", history: list[dict] | None = None):
+        
+        dynamic_prompts = self.pm.build_sql_rules(
+            category=analysis.category,
+            response_format=analysis.response_format
+        )
+
         prompt = ChatPromptTemplate.from_template("""
-            너는 로스트아크 DB 전문가야.
+            너는 로스트아크 DB 전문가야.                                 
 
             {common_rules}
 
             {error_feedback}
 
+            [SQL 생성 프로세스 - 반드시 이 순서로 추론해]
+            1. 분석: 질문 의도 파악
+            2. 테이블 선정: [스키마]와 [category_rules] 참조
+            3. 로직 설계: JOIN, CTE, JSON 파싱 설계
+            4. 검증: [공통 SQL 규칙] 준수 여부 체크
+            5. 출력: 최종 SQL을 ```sql```태그 안에 작성
+                                                  
             {response_format_rules}
 
             {category_rules}
 
             {few_shots}
 
-            [용어 힌트 - 질문 속 표현과 DB 정식 명칭 매핑]
+            [용어 힌트]
             {abbr_hints}
-
             {term_rules}
 
-            [이전 대화 - 후속 질문 맥락 파악용]
+            [이전 대화]
             {history}
-            ※ "다른", "나머지", "그 외" 같은 표현이 있으면 이전 대화에서 언급된 조건·분류를 제외하는 조건을 SQL에 반영해.
 
             [질문]
             {question}
 
             [분석]
             {analysis}
-            ※ response_format이 [유사 예시]의 분석 유형과 일치하는 예시를 우선 참고해.
+
+            [SQL 생성 지시]
+            위 분석 내용을 바탕으로 SQL을 작성하되, 특히 'JSON 파싱 문법'과 '최신 시점(MAX) 처리'에 집중해.
 
             [대상 닉네임]
             {nicknames}
-            - 닉네임이 있으면: 반드시 WHERE character_name = '...' 조건으로 사용하고 절대 생략하지 마.
-            - 닉네임이 없으면(없음): WHERE character_name 조건을 절대 추가하지 마. '닉네임' 같은 임의 플레이스홀더도 절대 사용 금지.
 
             [스키마]
             {schema}
 
             {auction_option_hint}
-
         """)
 
         structured_llm = self.llm.with_structured_output(SQLWithUIType)
         chain = (prompt | structured_llm).with_retry(stop_after_attempt=2)
 
-        # 스키마 요약 (로깅용 - 테이블명만)
         schema_tables = list(schema.keys()) if isinstance(schema, dict) else str(schema)[:200]
 
         start_time = time.time()
         cb = TokenCountCallback()
+
         detail = {
             "input": {
                 "abbr_hints": abbr_hints or "없음",
@@ -105,23 +116,19 @@ class SQLGenerator:
         try:
             result = chain.invoke({
                     "question": question,
-                    "analysis": analysis,
+                    "analysis": analysis.dict() if hasattr(analysis, 'dict') else analysis,
                     "nicknames": ", ".join(nicknames) if nicknames else "없음",
                     "schema": schema,
-                    "history": format_history(history, limit=4, max_ai_length=150) if history else "없음",
-                    "error_feedback": f"[이전 시도 오류 - 반드시 수정]\n{error}\n위 오류를 반드시 수정해서 다시 생성해." if error else "",
+                    "history": format_history(history, limit=4) if history else "없음",
+                    "error_feedback": f"[이전 시도 오류]\n{error}" if error else "",
                     "few_shots": few_shots,
                     "abbr_hints": abbr_hints or "없음",
                     "term_rules": self._build_term_rules(abbr_hints) if abbr_hints else "",
-                    "auction_option_hint": (
-                        f"[경매장 옵션 조건 - 최우선 적용]\n"
-                        f"아래 조건을 WHERE절에 글자 하나도 바꾸지 말고 그대로 복사해서 포함해.\n"
-                        f"{auction_conditions}\n"
-                        f"⚠️ 위 조건 대신 다른 옵션명이나 수치를 임의로 사용하는 것은 절대 금지."
-                    ) if auction_conditions else "",
-                    "common_rules": COMMON_RULES,
-                    "response_format_rules": RESPONSE_FORMAT_RULES,
-                    "category_rules": get_category_rules(analysis.category),
+                    "auction_option_hint": f"[경매장 옵션 조건]\n{auction_conditions}\n" if auction_conditions else "",
+
+                    "common_rules": dynamic_prompts["common_rules"],
+                    "response_format_rules": dynamic_prompts["response_format_rules"],
+                    "category_rules": dynamic_prompts["category_rules"],
             }, config={"callbacks": [cb]})
 
             if result is None:

@@ -1,0 +1,5 @@
+global_constraints: |
+  - character_name 조건으로 특정 유저 지정 절대 금지.
+  - 정척 테이블(engrave, lostark_skill_level, lostark_skill_tripod, ark_grid_core, ark_passive)은 제한 없이 자유롭게 조회 가능.
+  - 동적 테이블 조회 시 반드시 직업명, 클래스 등 의미 있는 WHERE 필터나 GROUP BY 포함 필수.
+  - 필터 없는 캐릭터 전체 SELECT 절대 금지.

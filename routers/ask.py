@@ -12,6 +12,7 @@ from utils.llm import llm, llm_answer, llm_sql
 from database import get_db
 from service.ai_service import AIService
 from service.chat_service import ChatService, run_background_save
+from service.prompt_manager import PromptManager
 
 logger = logging.getLogger(__name__)
 
@@ -53,8 +54,10 @@ async def ask_ai_stream(
 
         if row is None:
             raise HTTPException(status_code=429, detail="오늘의 질문 횟수를 모두 사용했어요.")
-
-    ai_service = AIService(llm, db, llm_sql=llm_sql, llm_answer=llm_answer)
+            
+    prompt_manager = PromptManager()
+        
+    ai_service = AIService(llm, db, llm_sql=llm_sql, llm_answer=llm_answer, prompt_manager=prompt_manager)
     answer_parts: list[str] = []
     structured_result: list = []
     generated_title: list[str] = []

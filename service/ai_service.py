@@ -44,9 +44,9 @@ _CATEGORY_SUBJECT_TYPES: dict[str, set[str]] = {
 
 class AIService:
 
-    def __init__(self, llm, db, llm_sql=None, llm_answer=None):
+    def __init__(self, llm, db, llm_sql=None, llm_answer=None, prompt_manager=None):
         self.db = db
-        self.sql_generator = SQLGenerator(llm_sql or llm)
+        self.sql_generator = SQLGenerator(llm_sql or llm, prompt_manager)
         self.analysis_generator = AnalysisGenerator(llm)
         self.answer_generator = AnswerGenerator(llm_answer or llm)
         self.populator = DataPopulator(db)

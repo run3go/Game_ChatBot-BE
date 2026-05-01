@@ -21,6 +21,8 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    from utils.reranker import CROSS_ENCODER
+    CROSS_ENCODER._get_model()
     yield
     logger.info("서버를 종료합니다.")
 
