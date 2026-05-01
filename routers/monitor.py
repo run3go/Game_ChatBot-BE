@@ -1,14 +1,14 @@
 from typing import Optional
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 from llm.llm_monitor import monitor
-from utils.llm import llm
 
 router = APIRouter(prefix="/monitor", tags=["monitor"])
 
 
 @router.get("/summary")
-def get_summary():
+def get_summary(request: Request):
     """대시보드 요약 통계"""
+    llm = request.app.state.llms["analyze"]
     summary = monitor.get_summary()
     summary["model_name"] = getattr(llm, "model_name", getattr(llm, "model", "unknown"))
     return summary

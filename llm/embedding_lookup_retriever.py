@@ -13,9 +13,6 @@ class EmbeddingLookupRetriever(EmbeddingsMixin):
         self._llm = None
 
     def _get_llm(self):
-        if self._llm is None:
-            from utils.llm import llm_sql
-            self._llm = llm_sql
         return self._llm
 
     def _extract_keywords(self, question: str) -> list[str]:

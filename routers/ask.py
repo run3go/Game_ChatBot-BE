@@ -8,15 +8,22 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from utils.llm import llm, llm_answer, llm_sql
 from database import get_db
 from service.ai_service import AIService
 from service.chat_service import ChatService, run_background_save
-from service.prompt_manager import PromptManager
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def get_ai_service(request: Request, db: Session = Depends(get_db)):
+    return AIService(
+        db=db,
+        sql_generator=request.app.state.sql_gen,
+        analysis_generator=request.app.state.analysis_gen,
+        answer_generator=request.app.state.answer_gen,
+    )
 
 
 @router.post("/ask/stream")
@@ -27,6 +34,7 @@ async def ask_ai_stream(
     chat_id: Optional[str] = Body(default=None),
     user_id: Optional[str] = Body(default=None),
     db: Session = Depends(get_db),
+    ai_service: AIService = Depends(get_ai_service),
 ):
     history = None
     is_first_message = False
@@ -55,9 +63,6 @@ async def ask_ai_stream(
         if row is None:
             raise HTTPException(status_code=429, detail="오늘의 질문 횟수를 모두 사용했어요.")
             
-    prompt_manager = PromptManager()
-        
-    ai_service = AIService(llm, db, llm_sql=llm_sql, llm_answer=llm_answer, prompt_manager=prompt_manager)
     answer_parts: list[str] = []
     structured_result: list = []
     generated_title: list[str] = []
@@ -114,7 +119,7 @@ async def ask_ai_stream(
         finally:
             if is_first_message and chat_id and user_id:
                 try:
-                    title = ChatService.generate_title(question, llm)
+                    title = ChatService.generate_title(question, request.app.state.llms["answer"])
                     generated_title.append(title)
                     yield f"data: {json.dumps({'type': 'title', 'content': title})}\n\n"
                 except Exception:
@@ -128,7 +133,7 @@ async def ask_ai_stream(
             question,
             answer_parts,
             structured_result,
-            llm,
+            request.app.state.llms["answer"],
             is_first_message,
             generated_title,
             resolved_nicknames,

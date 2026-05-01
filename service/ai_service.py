@@ -44,11 +44,18 @@ _CATEGORY_SUBJECT_TYPES: dict[str, set[str]] = {
 
 class AIService:
 
-    def __init__(self, llm, db, llm_sql=None, llm_answer=None, prompt_manager=None):
+    def __init__(
+        self, 
+        db, 
+        sql_generator: SQLGenerator, 
+        analysis_generator: AnalysisGenerator, 
+        answer_generator: AnswerGenerator
+    ):
         self.db = db
-        self.sql_generator = SQLGenerator(llm_sql or llm, prompt_manager)
-        self.analysis_generator = AnalysisGenerator(llm)
-        self.answer_generator = AnswerGenerator(llm_answer or llm)
+
+        self.sql_generator = sql_generator
+        self.analysis_generator = analysis_generator
+        self.answer_generator = answer_generator
         self.populator = DataPopulator(db)
 
     def ask(self, question: str, history: list[dict] | None = None):
