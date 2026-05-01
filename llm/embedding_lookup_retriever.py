@@ -2,6 +2,7 @@ import logging
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 from utils.lazy_embeddings import EmbeddingsMixin
+from utils.reranker import CROSS_ENCODER
 
 logger = logging.getLogger(__name__)
 
@@ -102,11 +103,22 @@ class EmbeddingLookupRetriever(EmbeddingsMixin):
             if e["score"] >= threshold
         ]
 
-    def retrieve(self, db: Session, question: str, k: int = 5, fallback_threshold: float = 0.50) -> list[dict]:
+    def retrieve(
+        self,
+        db: Session,
+        question: str,
+        k: int = 5,
+        fallback_threshold: float = 0.50,
+        candidate_k: int = 15,
+    ) -> list[dict]:
+        """
+        1차: text/vector 검색으로 candidate_k개 후보 수집
+        2차: CrossEncoder로 재정렬 후 상위 k개 반환
+        """
         keywords = self._extract_keywords(question) or [question]
 
         try:
-            text_results = self._text_search(db, keywords, k)
+            text_results = self._text_search(db, keywords, candidate_k)
         except Exception:
             logger.exception("embedding_lookup 텍스트 검색 실패")
             db.rollback()
@@ -115,7 +127,7 @@ class EmbeddingLookupRetriever(EmbeddingsMixin):
         logger.info("embedding_lookup 텍스트 매칭: %s", [r["formal_name"] for r in text_results])
 
         try:
-            vector_results = self._vector_search(db, keywords, k, fallback_threshold)
+            vector_results = self._vector_search(db, keywords, candidate_k, fallback_threshold)
         except Exception:
             logger.exception("embedding_lookup 벡터 검색 실패")
             db.rollback()
@@ -128,6 +140,15 @@ class EmbeddingLookupRetriever(EmbeddingsMixin):
             if r["formal_name"] not in seen:
                 merged.append(r)
                 seen.add(r["formal_name"])
+
+        # 2차 검증: CrossEncoder로 재정렬 후 상위 k개로 축소
+        if merged:
+            try:
+                merged = CROSS_ENCODER.rerank(question, merged, text_key="embedding_text")
+                merged = merged[:k]
+            except Exception:
+                logger.exception("CrossEncoder 재정렬 실패, 1차 결과 그대로 사용")
+                merged = merged[:k]
 
         logger.info("embedding_lookup 최종: %s", [r["formal_name"] for r in merged])
         return merged
