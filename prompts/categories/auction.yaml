@@ -12,6 +12,8 @@ rules: |
     - [종류 미지정 시 집계] 겁화/작열 등 종류를 명시하지 않고 레벨/티어만 물을 경우, 반드시 `GROUP BY A.name`을 적용하여 보석 종류별로 결과를 반환하라.
       * SELECT 절 필수 포함: A.name, MIN(A.buy_price) AS min_price, ROUND(AVG(A.buy_price)) AS avg_price, COUNT(A.id) AS item_count
 
+  - [장신구 SELECT 필수 컬럼] 반지/귀걸이/목걸이 조회 시 SELECT 절에 A.name, A.quality, A.buy_price, A.options를 예외 없이 포함할 것.
+
   - [데이터 정제]
     - auction_items_tb 조회 시 반드시 `A.end_date > CURRENT_TIMESTAMP`를 포함하여 만료된 매물을 제외할 것.
     - 장신구 옵션 키 조회 시, Few-shot에 정의된 공백이 포함된 키 명칭(예: '공격력  %')을 우선적으로 사용할 것.
