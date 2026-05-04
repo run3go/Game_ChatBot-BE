@@ -1,6 +1,7 @@
 fastapi
 uvicorn
 langchain_openai
+pydantic-settings
 python-dotenv
 sqlalchemy
 psycopg2-binary
@@ -8,4 +9,5 @@ numpy
 requests
 httpx
 sentence-transformers
+pyyaml
 pytest
