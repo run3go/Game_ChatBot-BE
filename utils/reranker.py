@@ -13,7 +13,7 @@ class CrossEncoderReranker:
     def _get_model(self) -> CrossEncoder:
         if self._model is None:
             logger.info("CrossEncoder 모델 로딩: %s", _MODEL_NAME)
-            self._model = CrossEncoder(_MODEL_NAME, automodel_args={"torch_dtype": "float16"})
+            self._model = CrossEncoder(_MODEL_NAME)
         return self._model
 
     def rerank(
