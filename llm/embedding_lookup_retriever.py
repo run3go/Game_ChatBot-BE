@@ -1,4 +1,5 @@
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 from utils.lazy_embeddings import EmbeddingsMixin
@@ -8,26 +9,6 @@ logger = logging.getLogger(__name__)
 
 
 class EmbeddingLookupRetriever(EmbeddingsMixin):
-
-    def __init__(self):
-        self._llm = None
-
-    def _get_llm(self):
-        return self._llm
-
-    def _extract_keywords(self, question: str) -> list[str]:
-        """LLM으로 질문에서 게임 용어 키워드만 추출."""
-        try:
-            result = self._get_llm().invoke(
-                f'로스트아크 게임 용어 키워드만 쉼표로 추출해. 조사·부사·동사·일반어는 제외.\n"{question}"',
-                max_tokens=64,
-            )
-            keywords = [k.strip() for k in result.content.split(",") if k.strip()][:10]
-        except Exception:
-            logger.exception("embedding_lookup 키워드 추출 실패, 질문 전체 사용")
-            keywords = [question]
-        logger.info("embedding_lookup 키워드 추출: %s", keywords)
-        return keywords or [question]
 
     def _text_search(self, db: Session, keywords: list[str], k: int) -> list[dict]:
         """키워드별로 embedding_text 텍스트 매칭 (공백 정규화 포함)"""
@@ -57,16 +38,17 @@ class EmbeddingLookupRetriever(EmbeddingsMixin):
             for row in rows
         ]
 
-    def _vector_search(self, db: Session, keywords: list[str], k: int, threshold: float) -> list[dict]:
-        """키워드별 개별 임베딩 후 최고 점수 기준으로 병합 (배치 API 1회 호출)"""
+    def _fetch_vectors(self, keywords: list[str]) -> list[list[float]] | None:
+        """임베딩 API 호출만 수행 (DB 접근 없음)."""
         try:
-            vectors = self._get_embeddings().embed_documents(keywords)
+            return self._get_embeddings().embed_documents(keywords)
         except Exception:
             logger.exception("embedding_lookup 임베딩 생성 실패")
-            return []
+            return None
 
-        # 키워드별로 DB 검색, entry별 최고 점수 유지
-        best: dict[str, dict] = {}  # formal_name → {entry, score}
+    def _vector_search_with_vectors(self, db: Session, vectors: list[list[float]], k: int, threshold: float) -> list[dict]:
+        """사전 계산된 벡터로 DB 검색 (API 호출 없음)."""
+        best: dict[str, dict] = {}
 
         for vector in vectors:
             rows = db.execute(text("""
@@ -95,7 +77,7 @@ class EmbeddingLookupRetriever(EmbeddingsMixin):
                     [(name, round(e["score"], 4)) for name, e in top])
 
         return [
-            {k: v for k, v in e.items() if k != "score"}
+            {key: val for key, val in e.items() if key != "score"}
             for e in sorted(best.values(), key=lambda x: -x["score"])
             if e["score"] >= threshold
         ]
@@ -106,14 +88,20 @@ class EmbeddingLookupRetriever(EmbeddingsMixin):
         question: str,
         k: int = 5,
         fallback_threshold: float = 0.50,
-        candidate_k: int = 15,
+        candidate_k: int = 10,
     ) -> list[dict]:
         """
-        1차: text/vector 검색으로 candidate_k개 후보 수집
-        2차: CrossEncoder로 재정렬 후 상위 k개 반환
+        임베딩 API 호출을 백그라운드 스레드에서 시작하고,
+        그 동안 텍스트 검색을 메인 스레드에서 실행해 대기 시간을 줄임.
+        이후 CrossEncoder로 재정렬 후 상위 k개 반환.
         """
-        keywords = self._extract_keywords(question) or [question]
+        keywords = [question]
 
+        # 임베딩 API 호출을 백그라운드에서 시작 (DB 접근 없음)
+        executor = ThreadPoolExecutor(max_workers=1)
+        embed_future = executor.submit(self._fetch_vectors, keywords)
+
+        # 임베딩 대기 중 텍스트 검색 실행
         try:
             text_results = self._text_search(db, keywords, candidate_k)
         except Exception:
@@ -123,12 +111,19 @@ class EmbeddingLookupRetriever(EmbeddingsMixin):
 
         logger.info("embedding_lookup 텍스트 매칭: %s", [r["formal_name"] for r in text_results])
 
+        # 임베딩 결과 수집 후 벡터 DB 검색
         try:
-            vector_results = self._vector_search(db, keywords, candidate_k, fallback_threshold)
+            vectors = embed_future.result(timeout=10)
+            executor.shutdown(wait=False)
+            if vectors:
+                vector_results = self._vector_search_with_vectors(db, vectors, candidate_k, fallback_threshold)
+            else:
+                vector_results = []
         except Exception:
             logger.exception("embedding_lookup 벡터 검색 실패")
             db.rollback()
             vector_results = []
+            executor.shutdown(wait=False)
 
         # 텍스트 결과 우선, 벡터 결과로 중복 없이 보충
         seen = {r["formal_name"] for r in text_results}
@@ -138,7 +133,7 @@ class EmbeddingLookupRetriever(EmbeddingsMixin):
                 merged.append(r)
                 seen.add(r["formal_name"])
 
-        # 2차 검증: CrossEncoder로 재정렬 후 상위 k개로 축소
+        # CrossEncoder로 재정렬 후 상위 k개로 축소
         if merged:
             try:
                 merged = CROSS_ENCODER.rerank(question, merged, text_key="embedding_text")
