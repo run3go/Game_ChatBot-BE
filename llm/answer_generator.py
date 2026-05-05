@@ -41,7 +41,6 @@ class AnswerGenerator:
             for chunk in chain.stream(inputs, config={"callbacks": [cb]}):
                 collected_chunks.append(chunk.content)
                 yield chunk.content
-
             log_llm_call(
                 generator_type="answer",
                 model_name=self.model_name,

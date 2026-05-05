@@ -5,6 +5,7 @@ from llm.answer_generator import AnswerGenerator
 from llm.embedding_lookup_retriever import EMBEDDING_LOOKUP
 from utils.chat_utils import extract_nicknames
 from service.nickname_service import validate_nicknames_batch
+from service.character_collector import collect_character
 from service.populator import DataPopulator
 from service.analysis_postprocessor import post_process
 from service.sql_pipeline import SQLPipeline
@@ -57,12 +58,12 @@ class AIService:
 
         if unverified and not nicknames:
             nickname = unverified[0]
-            yield "result", {
-                "ui_type": "CONFIRM_COLLECT",
-                "nickname": nickname,
-                "message": f"'{nickname}' 캐릭터 정보가 존재하지 않습니다. 데이터를 수집할까요? (예/아니오)",
-            }
-            return
+            yield "status", f"'{nickname}' 캐릭터 데이터를 수집하는 중이에요..."
+            success = collect_character(nickname, self.db)
+            if not success:
+                yield "result", [f"'{nickname}' 캐릭터 정보를 찾을 수 없어요."]
+                return
+            nicknames = [nickname]
 
         if not nicknames and analysis.category in _GLOBALIZABLE:
             analysis.category = "GLOBAL_" + analysis.category
