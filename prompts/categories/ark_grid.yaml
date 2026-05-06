@@ -1,0 +1,57 @@
+category_name: "ARK_GRID"
+
+rules: |
+  - 사용 테이블:
+    - `lostark.ark_grid_cores_tb` : 장착 코어 (character_name, collected_at, slot_index, name, grade, point)
+    - `lostark.ark_grid_gems_tb`  : 아크그리드 보석 (character_name, collected_at, slot_index, effect_1_name, effect_1_value, effect_2_name, effect_2_value, is_active)
+
+  - [테이블 선택 기준]
+    - '코어', '슬롯', '포인트', '질서/혼돈', 코어 등급(유물/전설/고대) → ark_grid_cores_tb
+    - '보석', '보석 효과', '스탯 합산' → ark_grid_gems_tb
+    - 코어와 보석 정보를 함께 요청 시 slot_index로 JOIN.
+
+  - [최신 시점 조회 - 필수 패턴]
+    - 모든 ARK_GRID 조회에서 반드시 MAX(collected_at) CTE로 최신 시점을 먼저 구하고 JOIN 하라.
+      WITH recent AS (
+          SELECT MAX(collected_at) AS max_at
+          FROM lostark.{테이블}
+          WHERE character_name = '{닉네임}'
+      )
+      SELECT a.* FROM lostark.{테이블} a
+      JOIN recent r ON a.collected_at = r.max_at
+      WHERE a.character_name = '{닉네임}'
+
+  - [보석 is_active 조건]
+    - 질문에 '활성', '장착' 등의 언급이 없어도 기본적으로 `is_active = true` 조건을 포함하라.
+    - 단, '비활성', '전체 보석' 등 명시적으로 비활성을 요청하는 경우에는 is_active 조건을 제거하라.
+
+  - [보석 효과 컬럼 처리]
+    - effect_1_value, effect_2_value는 VARCHAR 타입이므로 합산·비교 시 반드시 `CAST(... AS NUMERIC)`으로 형변환하라.
+    - NULL 가능성이 있으므로 SELECT 또는 UNION 시 `effect_1_name IS NOT NULL`, `effect_2_name IS NOT NULL` 조건을 포함하라.
+
+  - [스탯 집계 패턴 - Unpivot]
+    - 보석의 스탯 합산 요청 시, effect_1/effect_2를 UNION ALL로 수직 결합한 뒤 GROUP BY 하라.
+      unpivoted AS (
+          SELECT effect_1_name AS effect_name, CAST(effect_1_value AS NUMERIC) AS effect_value ...
+          WHERE is_active = true AND effect_1_name IS NOT NULL
+          UNION ALL
+          SELECT effect_2_name, CAST(effect_2_value AS NUMERIC) ...
+          WHERE is_active = true AND effect_2_name IS NOT NULL
+      )
+      SELECT effect_name, SUM(effect_value) AS total FROM unpivoted
+      GROUP BY effect_name ORDER BY total DESC
+
+  - [코어 필터링]
+    - 코어 종류(질서/혼돈 등): `name LIKE '%질서%'` 패턴 사용. grade 컬럼이 아닌 name으로 판단.
+    - 코어 희귀도(유물/전설/고대): `grade = '유물'` 등 grade 컬럼으로 판단. name 컬럼이 아님.
+    - 포인트 기준: 최대값은 20. 미완성 → `point < 20`, 완성 → `point = 20`, N포 이상 → `point >= N`
+
+  - [보석 레벨 검색]
+    - 보석 레벨은 name 컬럼에 포함됨. `name LIKE '%N레벨%'` 패턴을 사용하라.
+
+  - [정렬]
+    - 코어 목록 반환 시 기본 정렬은 `ORDER BY slot_index ASC`.
+    - 스탯 합산 결과는 `ORDER BY total DESC`.
+
+  - [다중 캐릭터 비교]
+    - 두 캐릭터 비교 시 `WHERE character_name IN ('A', 'B')` + `GROUP BY character_name` 패턴으로 각각 집계하라.

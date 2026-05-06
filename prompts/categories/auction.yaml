@@ -1,34 +1,71 @@
 category_name: "AUCTION"
 
 rules: |
-  - buy_price > 0 (즉시구매가 존재) 조건 포함.
-  - 장신구(반지/귀걸이/목걸이/팔찌) 조회 시 "3티어" 언급 없으면 반드시 tier = 4 고정.
-  - [캐릭터가 장착한 보석의 시세] armory_gem_tb의 name에 '광휘'가 포함된 경우, effect_type_name이 '재사용 대기시간 감소'라면 '작열', '피해 증가'라면 '겁화'로 치환.
-  - [캐릭터가 장착한 악세사리(반지, 귀걸이, 목걸이)의 시세] armory_equipment_tb에서 아이템의 옵션·품질을 추출한 뒤, 그 값을 기준으로 auction_items_tb에서 유사 매물을 검색.
+  - 사용 테이블:
+    - `lostark.auction_items_tb`    : 경매장 매물 (name, item_type, grade, tier, quality, buy_price, bid_price, end_date, options[jsonb], collected_at)
+    - `lostark.armory_gem_tb`       : 캐릭터 장착 보석 (character_name, collected_at, name, level)
+    - `lostark.armory_equipment_tb` : 캐릭터 장착 장비 (character_name, collected_at, type, slot_index, quality, additional_effect[jsonb])
+
+  - [최신 시점 조회 - 필수 패턴]
+    - 경매장 조회 시 반드시 item_type 조건을 포함한 CTE로 최신 시점을 구하고 JOIN 하라.
+      WITH latest_collection AS (
+          SELECT MAX(collected_at) AS max_time
+          FROM lostark.auction_items_tb
+          WHERE item_type = '{아이템타입}'
+      )
+      SELECT ... FROM lostark.auction_items_tb A
+      JOIN latest_collection L ON A.collected_at = L.max_time
+    - 캐릭터 장착 아이템 조회 시: `AND collected_at = (SELECT MAX(collected_at) FROM ... WHERE character_name = '{닉네임}')`
+
+  - [필수 조건]
+    - 경매장 매물 조회 시 반드시 `A.buy_price > 0` 조건을 포함하라.
+    - 만료된 매물 제외: `A.end_date > CURRENT_TIMESTAMP`
+
+  - [티어 / 등급 기본값]
+    - 장신구(반지/귀걸이/목걸이/팔찌) 조회 시, '3티어' 언급 없으면 `tier = 4`, grade = '고대' 고정.
+    - 보석 조회 시 grade 언급이 없으면 grade 조건은 생략.
 
   - [보석 조회]
-    - [레벨] 보석 레벨은 반드시 `name LIKE '%N레벨%'` 패턴을 사용해. grade나 level 컬럼에 레벨 숫자를 넣는 것은 금지.
-    - [등급 필터] `grade` 컬럼은 아이템 희귀도(고대/유물/전설)를 의미. 질문에 '고대', '유물' 등의 등급 명시가 없다면 `grade` 조건은 생략해.
-    - [종류 미지정 시 집계] 겁화/작열 등 종류를 명시하지 않고 레벨/티어만 물을 경우, 반드시 `GROUP BY A.name`을 적용하여 보석 종류별로 결과를 반환하라.
-      * SELECT 절 필수 포함: A.name, MIN(A.buy_price) AS min_price, ROUND(AVG(A.buy_price)) AS avg_price, COUNT(A.id) AS item_count
+    - 보석 레벨은 `name LIKE '%N레벨%'` 패턴을 사용하라. grade나 별도 level 컬럼에 레벨 숫자를 넣는 것은 금지.
+    - 광휘 보석은 경매장에서 '작열'로 취급하라: `REPLACE(name, '광휘', '작열')`
+    - 종류 미지정 시 집계: 겁화/작열 등 종류를 지정하지 않고 레벨/티어만 물을 경우 `GROUP BY A.name` 적용.
+      * SELECT 필수: A.name, MIN(A.buy_price) AS min_price, ROUND(AVG(A.buy_price)) AS avg_price, COUNT(A.id) AS item_count
+    - 보석 합성 비용 계산: level(N)_price * 3 vs level(N+1)_price 비교.
 
-  - [장신구 SELECT 필수 컬럼] 반지/귀걸이/목걸이 조회 시 SELECT 절에 A.name, A.quality, A.buy_price, A.options를 예외 없이 포함할 것.
+  - [장신구 options JSON 파싱]
+    - 경매장(auction_items_tb)의 options 컬럼 키는 공백이 포함됨. 아래 키 명칭을 정확히 사용하라.
+      * 딜러 목걸이: '추가 피해 %', '적에게 주는 피해 증가 %'
+      * 딜러 귀걸이: '공격력  %', '무기 공격력  %'  (공백 2개)
+      * 딜러 반지: '치명타 피해 %', '치명타 적중률 %'
+      * 서폿 목걸이: '낙인력 %', '세레나데, 신앙, 조화 게이지 획득량 증가 %'
+      * 서폿 귀걸이: '무기 공격력  %', '무기 공격력  +'  (공백 2개)
+      * 서폿 반지: '아군 공격력 강화 효과 %', '아군 피해량 강화 효과 %'
+      * 팔찌: '치명 +', '신속 +', '특화 +', '제압 +', '인내 +', '숙련 +'
+    - 파싱 방법: `(A.options->>'키명 %')::numeric`
+    - 장착 장비(armory_equipment_tb)의 additional_effect 컬럼은 jsonb 캐스팅 필요:
+      `REPLACE((additional_effect::jsonb)->>'옵션명', '%', '')::numeric`
 
-  - [데이터 정제]
-    - auction_items_tb 조회 시 반드시 `A.end_date > CURRENT_TIMESTAMP`를 포함하여 만료된 매물을 제외할 것.
-    - 장신구 옵션 키 조회 시, Few-shot에 정의된 공백이 포함된 키 명칭(예: '공격력  %')을 우선적으로 사용할 것.
+  - [장착 아이템 시세 조회 패턴]
+    - armory_equipment_tb에서 옵션 수치 추출 → CASE WHEN으로 옵션 등급 구간 매핑 → auction_items_tb에서 유사 매물 검색.
+    - 품질 유사 검색: `quality BETWEEN 장착품질 - 5 AND 장착품질 + 5`
+    - 반지/귀걸이는 2개 장착이므로 `DISTINCT ON (slot_index)` + `ORDER BY slot_index, collected_at DESC`
+
+  - [옵션 등급 구간 수치 (하한선)]
+    - 딜러 귀걸이 - 공격력%: 하 0.4, 중 0.95, 상 1.55 / 무기 공격력%: 하 1.8, 중 2.4, 상 3.0
+    - 딜러 반지 - 치명타 피해%: 하 1.1, 중 2.4, 상 4.0 / 치명타 적중률%: 하 0.4, 중 0.95, 상 1.55
+    - 딜러 목걸이 - 추가 피해%: 하 0.6, 중 1.6, 상 2.6 / 적에게 주는 피해 증가%: 하 0.55, 중 1.2, 상 2.0
+    - 서폿 귀걸이 - 무기 공격력%: 하 1.8, 중 2.4, 상 3.0 / 무기 공격력+: 하 80, 중 120, 상 195
+    - 서폿 목걸이 - 낙인력%: 하 3.5, 중 5.5, 상 8.0 / 세신조 게이지%: 하 2.5, 중 4.0, 상 6.0
+    - 서폿 반지 - 아군 공격력 강화%: 하 2.5, 중 3.5, 상 5.0 / 아군 피해량 강화%: 하 1.0, 중 1.5, 상 2.0
+    - 수치 구간 필터는 `(options->>'...')::numeric >= 하한값` 형태의 하한선 필터를 사용하라.
 
   - [팔찌 특이사항]
-    - 팔찌(Bracelet) 조회 시 품질(quality) 필터는 절대 사용하지 않으며, 오직 옵션 수치로만 검색할 것.
+    - 팔찌 조회 시 품질(quality) 조건은 절대 사용하지 말 것. 오직 스탯 수치로만 검색.
 
-  - [슬롯 중복 처리]
-    - 반지(Ring)와 귀걸이(Earring)는 2개씩 장착하므로, `DISTINCT ON (slot_index)`를 사용하여 슬롯별로 데이터를 분리하여 처리할 것.
-
-  - [수치 구간화]
-    - 유저가 '상/중/하' 옵션을 언급할 경우, 직접적인 '=' 매칭 대신 `(options->>...)::numeric >= [최소수치]` 형태의 하한선 필터를 사용할 것.
-
-  - [특수 용어: 상단일]
-    - '상단일'은 해당 부위의 핵심 옵션 2개 중 하나가 '상' 등급인 매물을 의미함.
-    - '딜러 목걸이 상단일' 요청 시: (추가 피해 >= 2.6) OR (적에게 주는 피해 증가 >= 2.0)
-    - '서폿 귀걸이 상단일' 요청 시: (무기 공격력 >= 195) OR (무기 공격력 % >= 3.0)
-    - 유저가 특정 옵션을 집어서 "무공 상단일"이라고 하면 해당 옵션만 '상' 수치로 필터링할 것.
+  - [상/하 옵션 용어 정의]
+    - 상상: 핵심 2옵션 모두 '상' 등급 수치 이상.
+    - 상단일: 핵심 2옵션 중 1개만 '상' 등급 수치 이상.
+    - 상중/중상, 상하/하상: 각각 '상'+'중', '상'+'하' 조합.
+    - 유저가 특정 옵션을 지정하면 해당 옵션만 지정 등급 수치로 필터링하라.
+    - 딜러 목걸이 상단일: (추가 피해 >= 2.6) OR (적에게 주는 피해 증가 >= 2.0)
+    - 서폿 귀걸이 상단일: (무기 공격력+ >= 195) OR (무기 공격력% >= 3.0)

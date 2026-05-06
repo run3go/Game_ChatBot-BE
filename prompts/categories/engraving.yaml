@@ -1,0 +1,60 @@
+category_name: "ENGRAVING"
+
+rules: |
+  - 사용 테이블: `lostark.armory_engravings_tb`
+    - 컬럼: character_name, collected_at, name, grade, level, ability_stone_level, description
+
+  - [최신 시점 조회 - 필수 패턴]
+    - 모든 각인 조회에서 반드시 MAX(collected_at) CTE를 먼저 구하고 스칼라 서브쿼리로 필터링하라.
+      WITH latest AS (
+          SELECT MAX(collected_at) AS max_at
+          FROM lostark.armory_engravings_tb
+          WHERE character_name = '{닉네임}'
+      )
+      SELECT ... FROM lostark.armory_engravings_tb
+      WHERE character_name = '{닉네임}'
+        AND collected_at = (SELECT max_at FROM latest)
+
+  - [컬럼 의미]
+    - grade: 각인의 희귀도 등급 ('전설', '유물', '고대' 등)
+    - level: 각인서를 통해 올린 레벨 (0~4). 0은 각인서를 읽지 않은 상태 (돌만 깎은 것).
+    - ability_stone_level: 어빌리티 스톤이 기여한 레벨. 0보다 크면 돌로 활성화된 각인.
+    - description: 각인 효과 텍스트.
+
+  - [각인 이름 검색]
+    - 각인 이름에 띄어쓰기 오류가 있을 수 있으므로, 특정 각인을 검색할 때 반드시 아래 패턴을 사용하라.
+      AND REPLACE(name, ' ', '') = REPLACE('{각인명}', ' ', '')
+
+  - [grade 필터링]
+    - 유물 = grade = '유물', 전설 = grade = '전설', 고대 = grade = '고대'
+    - 유물 미완성 각인(아직 유물 4레벨이 아닌 상태): `grade = '전설' OR (grade = '유물' AND level = 0)`
+      → 돌만 깎고 각인서를 읽지 않은 경우(grade='유물' AND level=0)도 미완성으로 포함하라.
+      → OR 조건은 반드시 괄호로 묶어라.
+
+  - [돌 각인 조회]
+    - ability_stone_level > 0 조건으로 어빌리티 스톤이 기여한 각인만 필터링.
+
+  - [변경 이력 조회 패턴]
+    - "바뀐 것", "변경된 것" 등 이력 질문 시, 최신 2개 시점만 비교하는 아래 패턴을 사용하라.
+      (ark_passive의 전체 타임라인 패턴과 다름에 주의)
+      WITH time_refs AS (
+          SELECT DISTINCT collected_at FROM lostark.armory_engravings_tb
+          WHERE character_name = '{닉네임}'
+          ORDER BY collected_at DESC LIMIT 2
+      ),
+      curr_data AS (SELECT ... WHERE collected_at = (SELECT MAX(collected_at) FROM time_refs)),
+      prev_data AS (SELECT ... WHERE collected_at = (SELECT MIN(collected_at) FROM time_refs)
+                    AND (SELECT COUNT(*) FROM time_refs) = 2)
+      SELECT COALESCE(c.name, p.name) AS engrave_name, ...
+      FROM curr_data c FULL OUTER JOIN prev_data p ON c.name = p.name
+      WHERE c.grade IS DISTINCT FROM p.grade
+         OR c.level IS DISTINCT FROM p.level
+         OR c.ability_stone_level IS DISTINCT FROM p.ability_stone_level
+
+  - [다중 캐릭터 비교]
+    - 두 캐릭터 비교 시, 각 캐릭터 CTE를 별도로 만들고 name 기준 FULL OUTER JOIN으로 비교하라.
+    - 한쪽만 보유한 각인도 누락 없이 포함하기 위해 반드시 FULL OUTER JOIN을 사용하라.
+    - 결과에 COALESCE(h.name, k.name) AS engrave_name 패턴으로 이름 컬럼을 통일하라.
+
+  - [정렬]
+    - 전체 각인 목록 반환 시 기본 정렬은 `ORDER BY grade DESC, level DESC`.

@@ -25,7 +25,11 @@ GAME_KNOWLEDGE = """
 
 [아크그리드]
 - 약어: 포→포인트
-- 코어 종류: 질서 코어, 혼돈 코어 → 효과/구성 조회는 GLOBAL_ARK_GRID
+- 코어 종류: 질서 코어, 혼돈 코어
+- "코어", "그리드 코어" 키워드가 있으면 → 닉네임 있으면 ARK_GRID, 없으면 GLOBAL_ARK_GRID
+- 효과/구성 조회는 GLOBAL_ARK_GRID
+- 코어 희귀도(유물/전설/고대) + "몇 개", "개수", "끼고 있어" 등 → ARK_GRID (PROFILE 금지)
+  예) "황로드유 고대 코어 몇 개야?" → ARK_GRID, COUNT
 
 [장비]
 - 강화 수치 / 장비 강화: 장비 강화 레벨(0~25강 등) → PROFILE/LIST. ENGRAVING 아님.

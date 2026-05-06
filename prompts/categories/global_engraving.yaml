@@ -1,0 +1,26 @@
+category_name: "GLOBAL_ENGRAVING"
+
+rules: |
+  - 사용 테이블: `lostark.engrave` (정적)
+    - 컬럼: engrave_name, search_name, basic_effect, legend_effect, relic_effect, stone_effect, relic_final
+
+  - [정적 테이블 조회]
+    - 시간 기반 컬럼이 없으므로 collected_at 필터를 사용하지 마라.
+
+  - [각인 이름 검색 - 필수 패턴]
+    - 유저가 초성·줄임말·띄어쓰기 오류를 사용할 수 있으므로, 반드시 engrave_name과 search_name 양쪽에 공백 제거 후 LIKE 검색을 적용하라.
+      WHERE REPLACE(engrave_name, ' ', '') LIKE '%' || REPLACE('{검색어}', ' ', '') || '%'
+         OR REPLACE(search_name, ' ', '') LIKE '%' || REPLACE('{검색어}', ' ', '') || '%'
+
+  - [컬럼 의미]
+    - basic_effect  : 기본(공통) 효과 텍스트
+    - legend_effect : 전설 등급 효과 텍스트
+    - relic_effect  : 유물 등급 효과 텍스트. 레벨별 수치가 '[ v1 / v2 / v3 / v4 ]' 형태로 내장됨.
+    - stone_effect  : 어빌리티 스톤 효과 텍스트
+    - relic_final   : 유물 최종(4레벨) 효과 요약 텍스트
+
+  - [레벨별 효과 수치 파싱]
+    - relic_effect 내부의 '[ v1 / v2 / v3 / v4 ]' 패턴에서 특정 레벨 수치 추출 시
+      SUBSTRING + SPLIT_PART를 사용하지 않고, relic_effect 전체 텍스트를 그대로 반환하라.
+      LLM이 수치 차이를 텍스트에서 직접 해석한다.
+    - 특정 레벨만 비교 요청 시에도 relic_effect 전체를 반환하면 충분하다.

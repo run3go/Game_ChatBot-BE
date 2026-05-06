@@ -1,0 +1,59 @@
+category_name: "GLOBAL_ARK_PASSIVE"
+
+rules: |
+  - 사용 테이블:
+    - `lostark.ark_passive`            : 패시브 사전 (정적) - passive_name, max_level, req_points,
+                                         job_name, category, tier,
+                                         lv1_effect, lv2_effect, lv3_effect, lv4_effect, lv5_effect
+    - `lostark.ark_passive_effects_tb` : 캐릭터 장착 패시브 (동적) - character_name, collected_at,
+                                         name[카테고리], tier, effect_name, level
+
+  - [테이블 선택 기준]
+    - 패시브 효과·레벨·조건 조회 → ark_passive (정적, 시간 필터 불필요)
+    - 실제 장착 현황·사용 통계 조회 → ark_passive_effects_tb (동적, 최신 시점 CTE 필요)
+    - 사용 통계 요청 시 반드시 두 테이블을 JOIN하라.
+
+  - [정적 테이블 조회]
+    - ark_passive는 시간 기반 컬럼이 없으므로 collected_at 필터를 사용하지 마라.
+    - 중복 행이 존재할 수 있으므로 SELECT 시 DISTINCT를 사용하라.
+    - 직업 필터: `job_name = '직업명'` (예: '워로드')
+    - 카테고리 필터: `category = '도약'` / '진화' / '깨달음'
+    - 티어 필터: `tier = 'N티어'` (문자열 타입. 예: '2티어')
+    - 패시브 이름 검색: `passive_name = '이름'` 또는 `passive_name LIKE '%검색어%'`
+
+  - [레벨별 효과 컬럼]
+    - 패시브 레벨별 효과는 lv1_effect ~ lv5_effect 컬럼에 저장됨.
+    - 효과 전체 조회 시 max_level과 함께 lv1_effect ~ lv5_effect를 모두 SELECT 하라.
+
+  - [사용 통계 패턴]
+    - 사용 빈도 집계 시 캐릭터별 최신 시점을 CTE로 먼저 구하고 JOIN 하라.
+      WITH latest_passives AS (
+          SELECT character_name, MAX(collected_at) AS recent_collect_time
+          FROM lostark.ark_passive_effects_tb
+          GROUP BY character_name
+      )
+      SELECT effect_name, COUNT(*) AS usage_count
+      FROM lostark.ark_passive_effects_tb a
+      JOIN latest_passives lp ON a.character_name = lp.character_name
+                              AND a.collected_at = lp.recent_collect_time
+      WHERE {conditions}
+      GROUP BY effect_name
+      ORDER BY usage_count DESC
+
+  - [특정 패시브 장착 유저 기반 통계 패턴]
+    - "X를 쓰는 유저들은 Y를 어떻게 찍어?" 류의 질문 시,
+      먼저 해당 패시브 장착 유저를 CTE로 추출한 뒤 그 유저들의 다른 패시브 사용 빈도를 집계하라.
+      WITH latest_passives AS (...),
+      target_users AS (
+          SELECT p.character_name
+          FROM lostark.ark_passive_effects_tb p
+          JOIN latest_passives lp ON ...
+          WHERE p.effect_name = '{타겟 패시브}'
+      )
+      SELECT a.name, a.tier, a.effect_name, COUNT(*) AS usage_count
+      FROM lostark.ark_passive_effects_tb a
+      JOIN latest_passives lp ON ...
+      JOIN target_users tu ON a.character_name = tu.character_name
+      WHERE a.effect_name != '{타겟 패시브}'
+      GROUP BY a.name, a.tier, a.effect_name
+      ORDER BY usage_count DESC

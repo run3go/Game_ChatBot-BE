@@ -1,0 +1,50 @@
+category_name: "GLOBAL_PROFILE"
+
+rules: |
+  - 사용 테이블:
+    - `lostark.armory_profile_tb`      : 캐릭터 프로필 (동적) - character_name, collected_at,
+                                         character_class_name, stat_crit, stat_swift, stat_spec,
+                                         stat_dom, stat_end, stat_exp, item_level
+    - `lostark.ark_passive_effects_tb` : 아크패시브 필터용 (동적) - character_name, effect_name
+    - `lostark.armory_engravings_tb`   : 각인 필터용 (동적) - character_name, name, level
+
+  - [최신 시점 조회 - ROW_NUMBER 패턴]
+    - GLOBAL_PROFILE은 MAX(collected_at) CTE + JOIN 대신 ROW_NUMBER() 패턴을 사용하라.
+      WITH latest_profiles AS (
+          SELECT character_name, {stat_columns},
+                 ROW_NUMBER() OVER(PARTITION BY character_name ORDER BY collected_at DESC) AS rnk
+          FROM lostark.armory_profile_tb
+          WHERE {conditions}
+      )
+      SELECT ... FROM latest_profiles WHERE rnk = 1
+
+  - [스탯 컬럼]
+    - stat_crit: 치명, stat_swift: 신속, stat_spec: 특화
+    - stat_dom: 제압, stat_end: 인내, stat_exp: 숙련
+    - '치신', '치특', '신특' 등 줄임말은 해당 stat_crit/stat_swift/stat_spec 조합으로 해석하라.
+
+  - [직업 필터]
+    - `character_class_name = '직업명'` 으로 필터링. (예: '워로드', '버서커')
+
+  - [타 테이블 조건으로 유저 필터링 패턴]
+    - 특정 각인·아크패시브·세팅을 가진 유저들의 프로필 통계 요청 시,
+      조건에 맞는 유저를 DISTINCT로 먼저 추출한 뒤 JOIN하라.
+      WITH target_users AS (
+          SELECT DISTINCT character_name
+          FROM lostark.{조건_테이블}
+          WHERE REPLACE({name_column}, ' ', '') = REPLACE('{조건값}', ' ', '')
+      ),
+      latest_profiles AS (
+          SELECT character_name, {stats},
+                 ROW_NUMBER() OVER(PARTITION BY character_name ORDER BY collected_at DESC) AS rnk
+          FROM lostark.armory_profile_tb
+          WHERE {class_condition}
+      )
+      SELECT ROUND(AVG(stat_crit), 0), ROUND(AVG(stat_swift), 0) ...
+      FROM latest_profiles p
+      JOIN target_users t ON p.character_name = t.character_name
+      WHERE p.rnk = 1
+
+  - [이름 검색]
+    - 아크패시브·각인 이름 매칭 시 공백 제거 패턴을 사용하라.
+      `REPLACE(effect_name, ' ', '') = REPLACE('{검색어}', ' ', '')`

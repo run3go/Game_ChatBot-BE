@@ -1,33 +1,120 @@
 category_name: "MARKET"
 
-# 1. 기본 제약 및 계산 규칙
-base_rules: |
-  - 테이블: `lostark.market_items_tb`만 사용.
-  - 단가 계산: current_min_price / bundle_count.
+rules: |
+  - 사용 테이블:
+    - `lostark.market_items_tb`      : 거래소 아이템 (name, item_type, grade, current_min_price, bundle_count, yday_avg_price, trade_remain_count, collected_at)
+    - `lostark.armory_engravings_tb` : 캐릭터 장착 각인 (character_name, name, level, collected_at)
+    - `lostark.engrave`              : 각인 정보 (engrave_name, relic_effect)
+    - `lostark.armory_avatars_tb`    : 캐릭터 장착 아바타 (character_name, name, type, grade)
 
-# 2. 시세 추이 조회 패턴 (핵심 로직)
-trend_analysis_pattern: |
-  - 시세 추이(기간 조회) 요청 시, 반드시 일별 최신 스냅샷을 먼저 구하는 아래 CTE 구조를 따른다.
-  - [필수 패턴]:
-    WITH daily_latest AS (
-        SELECT MAX(collected_at) AS max_at
-        FROM lostark.market_items_tb
-        WHERE {item_conditions} AND collected_at >= NOW() - INTERVAL '{N} days'
-        GROUP BY DATE(collected_at)
-    )
-    SELECT collected_at, current_min_price,
-           current_min_price - LAG(current_min_price) OVER (ORDER BY collected_at) AS price_diff
-    FROM lostark.market_items_tb
-    WHERE {item_conditions} AND collected_at IN (SELECT max_at FROM daily_latest)
-    ORDER BY collected_at ASC
+  - [최신 시점 조회 - 필수 패턴]
+    - 모든 거래소 조회에서 반드시 MAX(collected_at) CTE를 먼저 구하고 스칼라 서브쿼리로 필터링하라.
+      WITH latest_market AS (
+          SELECT MAX(collected_at) AS max_at
+          FROM lostark.market_items_tb
+          WHERE {item_conditions}
+      )
+      SELECT ... FROM lostark.market_items_tb
+      WHERE {item_conditions}
+        AND collected_at = (SELECT max_at FROM latest_market)
 
-# 3. 각인서 특화 규칙
-engraving_rules: |
-  - [약어 변환]: 유각(유물), 전각(전설)으로 grade를 매핑한다.
-  - [검색 패턴]: 정확 매칭(=) 대신 반드시 `ILIKE '%{핵심어}%'` 패턴을 사용한다.
-  - [필터 구성]: `WHERE item_type = '각인서' AND grade = '{등급}' AND name ILIKE '%{각인명}%'`
-    * 각인명은 '유각', '전각' 등의 단어를 제거한 순수 각인 이름만 추출하여 검색한다.
+  - [시세 추이 조회 패턴]
+    - 기간별 시세 변화 요청 시, 일별 최신 스냅샷만 추출하는 아래 CTE 구조를 따르라.
+      WITH daily_latest AS (
+          SELECT MAX(collected_at) AS max_at
+          FROM lostark.market_items_tb
+          WHERE {item_conditions}
+            AND collected_at >= NOW() - INTERVAL '{N} days'
+          GROUP BY DATE(collected_at)
+      )
+      SELECT collected_at, current_min_price,
+             current_min_price - LAG(current_min_price) OVER (ORDER BY collected_at) AS price_diff
+      FROM lostark.market_items_tb
+      WHERE {item_conditions}
+        AND collected_at IN (SELECT max_at FROM daily_latest)
+      ORDER BY collected_at ASC
 
-# 4. 최신 시점 조회
-latest_price_pattern: |
-  - 일반적인 최신가 조회 시, 아이템 조건과 함께 `MAX(collected_at)`를 사용하는 WITH 절(latest_market)을 선행.
+  - [컬럼 의미]
+    - current_min_price: 현재 최저가 (묶음 단위)
+    - bundle_count: 묶음 개수. 개당 단가 계산 시 `current_min_price / bundle_count` 사용.
+    - yday_avg_price: 전일 평균가. 가격 변동 비교에 사용.
+    - trade_remain_count: 거래 가능 횟수 (밀봉 아이템 등 재거래 제한 아이템 필터링에 사용).
+
+  - [전일 가격 비교 패턴]
+    - "어제보다 올랐어" → `current_min_price > yday_avg_price`, 차이: `current_min_price - yday_avg_price`
+    - "어제보다 내렸어" → `current_min_price < yday_avg_price`
+    - 두 값을 함께 반환할 때 `price_diff AS price_diff` 컬럼 포함.
+
+  - [이름 검색]
+    - 정확한 아이템명 조회: `name = '아이템명'`
+    - 부분 이름 조회: `name LIKE '%검색어%'`
+    - 각인서 검색: `name ILIKE '%각인명%'` (대소문자 무관, 띄어쓰기 차이 대응)
+
+  - [각인서 특화 규칙]
+    - 약어 변환: 유각 → grade = '유물', 전각 → grade = '전설'.
+    - 필터 구성: `WHERE item_type = '각인서' AND grade = '{등급}' AND name ILIKE '%{각인명}%'`
+      * 각인명은 '유각', '전각' 등의 단어를 제거한 순수 각인 이름만 사용하라.
+    ⚠️ '유각', '전각' 같은 약어는 절대 name 필터에 사용 금지. `name ILIKE '%유각%'` 형태는 잘못된 쿼리.
+    ⚠️ 질문에 특정 각인명이 없고 캐릭터의 각인 목록을 대상으로 할 때("쁘허가 읽은 유각", "장착한 유물 각인 시세")는
+       반드시 armory_engravings_tb에서 최신 각인 목록을 먼저 CTE로 추출한 뒤 market_items_tb와 JOIN하라.
+       이 경우 name 필터는 `M.name ILIKE '%' || E.name || '%'` 형태로 구성하라.
+
+  - [각인 레벨업 비용 계산 패턴]
+    - 유물 각인서 레벨 구조: 최대 4레벨, 1레벨당 5권 필요.
+    ⚠️ 권수 계산 시 반드시 `* 5`를 곱해야 한다. `(4 - E.level)` 또는 `E.level` 단독 사용 절대 금지.
+    - 질문 의도에 따라 권수 계산을 다르게 적용하라:
+      * "남은 비용", "올리는 데 얼마" → 남은 권수 = `(4 - E.level) * 5`
+      * "읽은 비용", "지금까지 쓴 돈", "읽은 시세" → 읽은 권수 = `E.level * 5`
+      * "전체 비용", "다 올리면" → 전체 권수 = `20` (4레벨 × 5권)
+    - 총 비용: `{권수} * (M.current_min_price / M.bundle_count)`
+    - grade 필터: 유물 각인 → `M.grade = '유물'`, 전설 각인 → `M.grade = '전설'`
+    - 캐릭터 각인 + 거래소 가격 조합 쿼리는 반드시 아래 패턴을 그대로 따라라:
+      WITH latest_eng AS (
+          SELECT MAX(collected_at) AS max_at
+          FROM lostark.armory_engravings_tb
+          WHERE character_name = '{닉네임}'
+      ),
+      my_engravings AS (
+          SELECT name, level
+          FROM lostark.armory_engravings_tb
+          WHERE character_name = '{닉네임}'
+            AND grade = '{등급}'
+            AND collected_at = (SELECT max_at FROM latest_eng)
+      ),
+      latest_market AS (
+          SELECT MAX(collected_at) AS max_at
+          FROM lostark.market_items_tb
+          WHERE item_type = '각인서' AND grade = '{등급}'
+      )
+      -- 남은 비용 ("올리는 데 얼마"):
+      SELECT E.name, E.level,
+             (4 - E.level) * 5 AS books_needed,
+             ROUND(M.current_min_price / M.bundle_count) AS price_per_book,
+             (4 - E.level) * 5 * ROUND(M.current_min_price / M.bundle_count) AS total_cost
+      FROM my_engravings E
+      JOIN lostark.market_items_tb M ON M.name ILIKE '%' || E.name || '%'
+      WHERE M.item_type = '각인서'
+        AND M.grade = '{등급}'
+        AND M.collected_at = (SELECT max_at FROM latest_market)
+
+      -- 읽은 비용 ("지금까지 쓴 돈", "읽은 시세"):
+      SELECT E.name, E.level,
+             E.level * 5 AS books_read,
+             ROUND(M.current_min_price / M.bundle_count) AS price_per_book,
+             E.level * 5 * ROUND(M.current_min_price / M.bundle_count) AS total_cost
+      FROM my_engravings E
+      JOIN lostark.market_items_tb M ON M.name ILIKE '%' || E.name || '%'
+      WHERE M.item_type = '각인서'
+        AND M.grade = '{등급}'
+        AND M.collected_at = (SELECT max_at FROM latest_market)
+
+  - [각인 효과 조회 패턴]
+    - 각인 효과(relic_effect 등) 조회 시 lostark.engrave 테이블을 사용하라.
+    - 연결 방법: `JOIN lostark.engrave T2 ON item_name LIKE '%' || T2.engrave_name || '%'`
+
+  - [효율 비교 패턴]
+    - 묶음 크기별 단가 비교 시 CASE WHEN으로 아이템별 수량을 매핑한 뒤 나눗셈하라.
+      CASE WHEN name LIKE '%(대)%' THEN 3000
+           WHEN name LIKE '%(중)%' THEN 2000
+           WHEN name LIKE '%(소)%' THEN 1000 END AS item_amount,
+      current_min_price / CASE ... END AS price_per_unit

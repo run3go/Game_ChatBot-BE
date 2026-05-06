@@ -1,0 +1,67 @@
+category_name: "GLOBAL_SKILL"
+
+rules: |
+  - 사용 테이블:
+    - `lostark.armory_skills_tb`       : 캐릭터 장착 스킬 (동적) - character_name, collected_at,
+                                         skill_name, tripod_1_name, tripod_2_name, tripod_3_name,
+                                         rune_name, rune_grade
+    - `lostark.lostark_skill_tripod`   : 트라이포드 사전 (정적) - skill_name, unlock_tier, tripod_name, description
+    - `lostark.lostark_rune_tb`        : 룬 사전 (정적) - rune_name, grade, rune_effect
+    - `lostark.ark_passive_effects_tb` : 아크패시브 필터용 (동적) - character_name, collected_at, effect_name
+
+  - [테이블 선택 기준]
+    - 트라이포드 효과·설명 조회 → lostark_skill_tripod (정적, 시간 필터 불필요)
+    - 룬 효과·설명 조회 → lostark_rune_tb (정적, 시간 필터 불필요)
+    - 실제 장착 통계·사용 빈도 조회 → armory_skills_tb (동적, 최신 시점 CTE 필요)
+
+  - [최신 시점 조회 - 필수 패턴]
+    - armory_skills_tb 통계 조회 시 반드시 캐릭터별 MAX(collected_at) CTE를 먼저 구하고 JOIN 하라.
+      WITH latest_collect AS (
+          SELECT character_name, MAX(collected_at) AS recent_collect_time
+          FROM lostark.armory_skills_tb
+          GROUP BY character_name
+      )
+      SELECT ... FROM lostark.armory_skills_tb a
+      JOIN latest_collect b ON a.character_name = b.character_name
+                            AND a.collected_at = b.recent_collect_time
+
+  - [트라이포드 통계]
+    - 트라이포드 컬럼: tripod_1_name, tripod_2_name, tripod_3_name
+    - '1트포', '2트포', '3트포' 는 각각 tripod_1_name, tripod_2_name, tripod_3_name 을 의미.
+    - 통계 집계 시 NULL 제외: `AND tripod_N_name IS NOT NULL`
+    - GROUP BY tripod_N_name, ORDER BY usage_count DESC
+
+  - [룬 통계]
+    - 룬 컬럼: rune_name, rune_grade
+    - 통계 집계 시 NULL 제외: `AND rune_name IS NOT NULL`
+    - GROUP BY rune_name, rune_grade (등급도 함께 묶어야 같은 이름 다른 등급 룬을 구분할 수 있음)
+
+  - [타 테이블 조건으로 유저 필터링 패턴]
+    - 특정 아크패시브·각인 세팅 유저들의 스킬 통계 요청 시,
+      조건 테이블에서 최신 시점 기준으로 유저를 먼저 추출한 뒤 JOIN 하라.
+      WITH latest_skills AS (
+          SELECT character_name, MAX(collected_at) AS recent_collect_time
+          FROM lostark.armory_skills_tb GROUP BY character_name
+      ),
+      latest_{조건테이블} AS (
+          SELECT character_name, MAX(collected_at) AS recent_collect_time
+          FROM lostark.{조건테이블} GROUP BY character_name
+      ),
+      target_users AS (
+          SELECT t.character_name
+          FROM lostark.{조건테이블} t
+          JOIN latest_{조건테이블} l ON t.character_name = l.character_name
+                                    AND t.collected_at = l.recent_collect_time
+          WHERE {조건}
+      )
+      SELECT a.skill_name, COUNT(*) AS usage_count
+      FROM lostark.armory_skills_tb a
+      JOIN latest_skills ls ON a.character_name = ls.character_name
+                            AND a.collected_at = ls.recent_collect_time
+      JOIN target_users tu ON a.character_name = tu.character_name
+      GROUP BY a.skill_name ORDER BY usage_count DESC
+
+  - [정적 테이블 조회]
+    - lostark_skill_tripod, lostark_rune_tb는 collected_at 필터 없이 직접 조회하라.
+    - 트라이포드 조회 시 `ORDER BY unlock_tier ASC, tripod_name ASC` 로 정렬.
+    - 룬 등급 필터: `grade = '전설'` / '영웅' 등 grade 컬럼 사용.

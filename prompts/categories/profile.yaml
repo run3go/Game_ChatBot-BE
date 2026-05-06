@@ -1,0 +1,63 @@
+category_name: "PROFILE"
+
+rules: |
+  - 사용 테이블:
+    - `lostark.armory_profile_tb`   : 캐릭터 프로필 (character_name, collected_at, character_level,
+                                      item_avg_level, combat_power, character_class_name,
+                                      stat_crit, stat_swift, stat_spec, stat_dom, stat_end, stat_exp)
+    - `lostark.armory_equipment_tb` : 장착 장비 (character_name, collected_at, type, slot_index,
+                                      name, quality, honing_level, advanced_honing_level,
+                                      basic_effect, additional_effect[jsonb])
+
+  - [최신 시점 패턴 - 상황별 선택]
+    - 단일 캐릭터 단순 조회 (1~2개 컬럼): `ORDER BY collected_at DESC LIMIT 1`
+    - 단일 캐릭터 장비 전체 조회: MAX(collected_at) CTE + 스칼라 서브쿼리
+        WITH latest_equip AS (
+            SELECT MAX(collected_at) AS max_at
+            FROM lostark.armory_equipment_tb
+            WHERE character_name = '{닉네임}'
+        )
+        WHERE character_name = '{닉네임}' AND collected_at = (SELECT max_at FROM latest_equip)
+    - 다중 캐릭터 비교: ROW_NUMBER() 패턴
+        ROW_NUMBER() OVER(PARTITION BY character_name ORDER BY collected_at DESC) AS rnk
+        WHERE rnk = 1
+
+  - [스탯 컬럼]
+    - stat_crit(치명), stat_swift(신속), stat_spec(특화), stat_dom(제압), stat_end(인내), stat_exp(숙련)
+    - '치신' → stat_crit + stat_swift, '치특' → stat_crit + stat_spec 등 줄임말 해석.
+
+  - [장비 type 값]
+    - 방어구: '무기', '투구', '상의', '하의', '장갑', '어깨'
+    - 장신구: '목걸이', '귀걸이', '반지', '팔찌', '어빌리티 스톤'
+    - 기타: '보주'
+    - 귀걸이와 반지는 2개씩 장착. 비교 시 slot_index 기준 pair_id 처리 필요 (아래 참조).
+
+  - [additional_effect JSON 파싱]
+    - additional_effect는 빈 문자열일 수 있으므로 캐스팅 시 반드시 NULLIF 처리:
+      `NULLIF(additional_effect, '')::jsonb`
+    - 옵션별 key-value 언팩: CROSS JOIN LATERAL + jsonb_each_text()
+    - 상상/하옵 여부 판단은 SQL에서 하지 말고 additional_effect 텍스트를 그대로 반환하라.
+      LLM이 수치를 직접 비교해 판단한다.
+    - 복수 장비의 additional_effect 집계: `JSONB_OBJECT_AGG(type || '_' || slot_index::text, additional_effect)`
+
+  - [다중 캐릭터 장비 비교 패턴]
+    - 반지/귀걸이처럼 동일 type이 2개인 경우, 단순 type JOIN 시 4줄로 뻥튀기됨.
+    - 각 캐릭터 CTE 안에서 `ROW_NUMBER() OVER(PARTITION BY type ORDER BY slot_index) AS pair_id`로 순번을 매기고,
+      FULL OUTER JOIN 시 `ON h.type = k.type AND h.pair_id = k.pair_id` 조건을 사용하라.
+    - 결과 정렬: 무기 → 방어구 → 장신구 순 CASE WHEN 정렬 권장.
+
+  - [기간 조회]
+    - 성장 추이, 변경 이력 등 기간 조회 시: `AND collected_at >= NOW() - INTERVAL 'N days/months'`
+    - 일자별 단순 조회 시 CTE 없이 WHERE + ORDER BY collected_at ASC 로 충분.
+
+  - [변경 이력 감지 패턴]
+    - LAG() OVER(PARTITION BY type ORDER BY collected_at ASC) 로 이전 수치 추출.
+    - 변경된 시점만 필터: `WHERE enh_lv IS DISTINCT FROM prev_enh_lv OR adv_lv IS DISTINCT FROM prev_adv_lv`
+
+  - [달성 시점 조회 패턴]
+    - 특정 조건이 처음 충족된 시점: `MIN(collected_at) FILTER (WHERE condition) AS hit_time`
+    - 수집 이전 달성 여부 구분: hit_time = MIN(collected_at) 이면 수집 전부터 해당 상태였으므로 `is_certain = FALSE`.
+
+  - [아이템 레벨 구간 평균]
+    - 특정 아이템 레벨 기준 ±5 구간의 통계: `item_avg_level BETWEEN N - 5 AND N + 5`
+    - 캐릭터별 최신 데이터만 사용하기 위해 ROW_NUMBER() 패턴 적용.

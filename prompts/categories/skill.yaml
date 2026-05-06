@@ -1,0 +1,67 @@
+category_name: "SKILL"
+
+rules: |
+  - 사용 테이블:
+    - `lostark.armory_skills_tb`     : 캐릭터 스킬 (동적) - character_name, collected_at,
+                                       skill_name, skill_level, rune_name, rune_grade,
+                                       tripod_1_name, tripod_2_name, tripod_3_name,
+                                       type, is_counter, weak_point, stagger, cooldown
+    - `lostark.armory_gem_tb`        : 캐릭터 보석 (동적) - character_name, collected_at,
+                                       skill_name, name, level, effect_type_name
+    - `lostark.lostark_skill_tripod` : 트라이포드 사전 (정적) - skill_name, tripod_name, description
+
+  - [최신 시점 조회 - 필수 패턴]
+    - 단일 테이블 조회: MAX(collected_at) CTE + JOIN
+        WITH step00 AS (
+            SELECT MAX(collected_at) AS recent_collect_time
+            FROM lostark.armory_skills_tb
+            WHERE character_name = '{닉네임}'
+        )
+        SELECT a.* FROM lostark.armory_skills_tb a
+        JOIN step00 b ON a.collected_at = b.recent_collect_time
+        WHERE a.character_name = '{닉네임}'
+    - 스킬 + 보석 동시 조회: 두 테이블 각각 별도 CTE로 최신 시점을 구하고 모두 JOIN 하라.
+        WITH gem_recent AS (SELECT MAX(collected_at) AS recent_collect_time FROM lostark.armory_gem_tb WHERE character_name = '{닉네임}'),
+             skill_recent AS (SELECT MAX(collected_at) AS recent_collect_time FROM lostark.armory_skills_tb WHERE character_name = '{닉네임}')
+
+  - [스킬 컬럼]
+    - type: 스킬 유형 (예: '차지', '점프')
+    - is_counter: 카운터 가능 여부 (boolean)
+    - weak_point: 파괴 수치 (숫자)
+    - stagger: 무력화 등급 ('하', '중하', '중', '중상', '상', '최상')
+    - cooldown: 기본 쿨타임 (초)
+    - 무력화 범위 필터: '중 이상' → `stagger IN ('중', '중상', '상', '최상')`
+
+  - [보석 컬럼]
+    - effect_type_name: '피해 증가'(겁화/작열계), '재사용 대기시간 감소'(쿨감)
+    - skill_name: 보석이 적용되는 스킬 이름 (armory_skills_tb.skill_name과 JOIN 키)
+    - 겁화/작열 비율 조회: `effect_type_name IN ('피해 증가', '재사용 대기시간 감소')` + GROUP BY effect_type_name
+
+  - [트라이포드 효과 조회]
+    - 트라이포드 효과(description) 조회 시 lostark_skill_tripod를 3번 LEFT JOIN 하라.
+        LEFT JOIN lostark.lostark_skill_tripod t1 ON r.skill_name = t1.skill_name AND r.tripod_1_name = t1.tripod_name
+        LEFT JOIN lostark.lostark_skill_tripod t2 ON r.skill_name = t2.skill_name AND r.tripod_2_name = t2.tripod_name
+        LEFT JOIN lostark.lostark_skill_tripod t3 ON r.skill_name = t3.skill_name AND r.tripod_3_name = t3.tripod_name
+
+  - [다중 캐릭터 스킬 비교]
+    - 스킬 비교 시 스킬 테이블과 보석 테이블을 함께 JOIN하여 보석 차이도 포함하라.
+    - 각 캐릭터 CTE에서 보석을 `jsonb_agg(jsonb_build_object('gem', g.name, 'lvl', g.level)) FILTER (WHERE g.name IS NOT NULL)` 로 집계.
+    - FULL OUTER JOIN 후 `IS DISTINCT FROM` 조건으로 다른 스킬만 필터링:
+        WHERE c1.skill_level IS DISTINCT FROM c2.skill_level
+           OR c1.rune_name IS DISTINCT FROM c2.rune_name
+           OR c1.gems IS DISTINCT FROM c2.gems
+
+  - [동일 캐릭터 시점 비교]
+    - 최근 2개 시점 추출: `SELECT DISTINCT collected_at ORDER BY collected_at DESC LIMIT 2`
+    - MAX(collected_at) = 현재, MIN(collected_at) = 이전으로 사용.
+
+  - [트라이포드 변경 이력 패턴]
+    - `LAG(tripod_N_name) OVER(PARTITION BY skill_name ORDER BY collected_at ASC)` 로 이전 값 추출.
+    - 변경 감지: `tripod_N_name IS DISTINCT FROM prev_tN` 조건.
+    - 변경된 스킬만 추출 후 ROW_NUMBER()로 스킬별 최신 변경 1건만 선택.
+
+  - [보석 없는 스킬 조회]
+    - `NOT EXISTS (SELECT 1 FROM armory_gem_tb WHERE skill_name = s.skill_name AND ...)` 패턴 사용.
+
+  - [동점자 포함 최대·최소값]
+    - 동점자를 모두 포함해야 할 때: `ORDER BY 컬럼 DESC FETCH FIRST 1 ROWS WITH TIES`

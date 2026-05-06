@@ -8,7 +8,14 @@ sql_basics: |
 dynamic_table_rules: |
   - [단일 최신화] collected_at 존재 테이블 조회 시, WITH step00 AS (SELECT MAX(collected_at) ... WHERE character_name = '...') 패턴 필수.
   - [전체 집계] character_name별 MAX(collected_at)를 구한 뒤 조인하여 최신 스냅샷만 필터링.
-  - [다중 조인] 동적 테이블 2개 조인 시, 각각의 최신 시점을 별도 CTE로 구한 뒤 메인에서 조인.
+  - [다중 조인] collected_at이 있는 테이블을 2개 이상 조인할 때, 테이블마다 별도 CTE로 최신 시점을 구한 뒤 메인에서 조인하라.
+    ⚠️ 카테고리가 다른 동적 테이블(예: MARKET 쿼리에서 armory_engravings_tb 조인)도 동일하게 적용. 예외 없음.
+      WITH latest_a AS (SELECT MAX(collected_at) AS max_at FROM lostark.table_a WHERE character_name = '{닉네임}'),
+           latest_b AS (SELECT MAX(collected_at) AS max_at FROM lostark.table_b WHERE character_name = '{닉네임}')
+      SELECT ... FROM lostark.table_a a
+      JOIN lostark.table_b b ON b.character_name = a.character_name
+      WHERE a.collected_at = (SELECT max_at FROM latest_a)
+        AND b.collected_at = (SELECT max_at FROM latest_b)
   - [시점 비교] "어제", "이전" 비교 시 `SELECT DISTINCT collected_at ORDER BY 1 DESC LIMIT 2`로 실제 시점 2개 추출.
 
 syntax_rules: |

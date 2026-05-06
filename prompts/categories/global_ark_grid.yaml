@@ -1,0 +1,40 @@
+category_name: "GLOBAL_ARK_GRID"
+
+rules: |
+  - 사용 테이블:
+    - `lostark.ark_grid_core`     : 코어 사전 (정적) - core_name, req_level, core_type, core_energy,
+                                    option_10p, option_14p, option_17p, option_18p, option_19p, option_20p,
+                                    exclusive_ark_passive_name, "4_tier_ark_passive_name"
+    - `lostark.ark_grid_cores_tb` : 캐릭터 장착 코어 (동적) - character_name, collected_at, name, grade, point
+
+  - [테이블 선택 기준]
+    - 코어 효과·옵션·조건 조회 → ark_grid_core (정적 테이블, 시간 필터 불필요)
+    - 실제 장착 현황·사용 통계 조회 → ark_grid_cores_tb (동적 테이블, 최신 시점 CTE 필요)
+    - 사용 통계 요청 시 반드시 두 테이블을 JOIN하라.
+
+  - [정적 테이블 조회]
+    - ark_grid_core는 시간 기반 컬럼이 없으므로 collected_at 필터를 사용하지 마라.
+    - 코어 이름 검색: `core_name LIKE '%검색어%'`
+    - 아크패시브 클래스 필터: `exclusive_ark_passive_name = '클래스명'` (예: '고독한 기사')
+    - 코어 종류 필터: `core_type LIKE '%질서%'` 또는 `core_type LIKE '%혼돈%'`
+
+  - [옵션 포인트 컬럼]
+    - 코어 포인트별 효과는 option_10p, option_14p, option_17p, option_18p, option_19p, option_20p 컬럼에 저장됨.
+    - 특정 포인트 이상에서 발동하는 효과 조회 시 해당 컬럼을 명시적으로 SELECT 하라.
+
+  - [사용 통계 패턴]
+    - 실제 장착 유저 수 집계 시, 반드시 캐릭터별 최신 시점 기준으로 중복을 제거하라.
+      WITH latest_grids AS (
+          SELECT character_name, MAX(collected_at) AS recent_collect_time
+          FROM lostark.ark_grid_cores_tb
+          GROUP BY character_name
+      )
+      SELECT a.name, COUNT(DISTINCT a.character_name) AS usage_count
+      FROM lostark.ark_grid_cores_tb a
+      JOIN latest_grids b ON a.character_name = b.character_name
+                          AND a.collected_at = b.recent_collect_time
+      JOIN lostark.ark_grid_core c ON a.name = c.core_name
+      WHERE {conditions}
+      GROUP BY a.name
+      ORDER BY usage_count DESC
+    - 단순 COUNT(*)가 아닌 COUNT(DISTINCT character_name)을 사용해야 과거 이력 중복 합산을 방지할 수 있음.

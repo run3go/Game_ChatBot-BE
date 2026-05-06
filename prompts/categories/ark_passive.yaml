@@ -1,0 +1,69 @@
+category_name: "ARK_PASSIVE"
+
+rules: |
+  - 사용 테이블:
+    - `lostark.ark_passive_effects_tb` : 장착 효과 (character_name, collected_at, name[카테고리], tier, effect_name, level)
+    - `lostark.ark_passive_points_tb`  : 포인트 현황 (character_name, collected_at, name[카테고리], value, point_rank, point_level)
+
+  - [테이블 선택 기준]
+    - '효과', '찍은 것', '어떤 패시브' 등 효과 목록 조회 → ark_passive_effects_tb
+    - '포인트', '랭크', '레벨' 등 수치 조회 → ark_passive_points_tb
+    - 두 정보를 함께 요청 시 character_name + name으로 JOIN.
+
+  - [최신 시점 조회 - 필수 패턴]
+    - 모든 ARK_PASSIVE 조회에서 반드시 MAX(collected_at) CTE로 최신 시점을 먼저 구하고 JOIN 하라.
+      WITH step00 AS (
+          SELECT MAX(collected_at) AS recent_collect_time
+          FROM lostark.{테이블}
+          WHERE character_name = '{닉네임}'
+      )
+      SELECT a.* FROM lostark.{테이블} a
+      JOIN step00 b ON a.collected_at = b.recent_collect_time
+      WHERE a.character_name = '{닉네임}'
+
+  - [카테고리(name) 컬럼]
+    - 아크패시브는 '진화', '깨달음', '도약' 3가지 카테고리로 구분되며, name 컬럼에 저장됨.
+    - 질문에서 카테고리를 명시하면 `a.name = '{카테고리}'` 조건을 추가하라.
+    - 카테고리 미지정 시 전체를 반환하고 `ORDER BY a.name ASC, a.tier ASC`로 정렬하라.
+
+  - [티어(tier) 필터]
+    - tier 컬럼은 문자열 타입. 숫자 비교가 아닌 `a.tier = '2'` 형태로 사용하라.
+
+  - [포인트 테이블 컬럼]
+    - value: 해당 카테고리의 총 포인트 수치
+    - point_rank: 현재 랭크
+    - point_level: 현재 레벨
+
+  - [변경 이력 조회 패턴]
+    - "바뀐 것", "변경된 것", "언제 바뀌었어" 등 이력 질문 시, 단순 최신 2시점 비교가 아닌
+      전체 타임라인 × 전체 효과 목록을 CROSS JOIN한 그리드를 만들어 변경 이벤트를 포착하라.
+      WITH all_times AS (
+          SELECT DISTINCT collected_at,
+                 LAG(collected_at) OVER (ORDER BY collected_at ASC) AS prev_at
+          FROM lostark.ark_passive_effects_tb
+          WHERE character_name = '{닉네임}'
+      ),
+      all_effects AS (
+          SELECT DISTINCT name AS category, tier, effect_name
+          FROM lostark.ark_passive_effects_tb
+          WHERE character_name = '{닉네임}'
+      ),
+      history_grid AS (
+          SELECT t.collected_at, t.prev_at, e.category, e.tier, e.effect_name
+          FROM all_times t CROSS JOIN all_effects e
+          WHERE t.prev_at IS NOT NULL
+      )
+      SELECT g.*, p.level AS before_level, c.level AS current_level
+      FROM history_grid g
+      LEFT JOIN lostark.ark_passive_effects_tb c
+        ON c.character_name = '{닉네임}' AND c.collected_at = g.collected_at
+       AND c.name = g.category AND c.tier = g.tier AND c.effect_name = g.effect_name
+      LEFT JOIN lostark.ark_passive_effects_tb p
+        ON p.character_name = '{닉네임}' AND p.collected_at = g.prev_at
+       AND p.name = g.category AND p.tier = g.tier AND p.effect_name = g.effect_name
+      WHERE c.level IS DISTINCT FROM p.level
+      ORDER BY g.collected_at DESC, g.category, g.tier, g.effect_name
+
+  - [다중 캐릭터 비교]
+    - 두 캐릭터 비교 시 `WHERE character_name IN ('A', 'B')` + `GROUP BY character_name` 패턴으로 각각 집계하거나,
+      서브쿼리로 각 캐릭터의 최신 데이터를 JSON으로 캡슐화하여 반환하라.
