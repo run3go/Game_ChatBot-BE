@@ -1,5 +1,5 @@
 # analysis_generator 프롬프트에 주입되는 게임 도메인 지식
-GAME_KNOWLEDGE = """
+_LOSTARK_KNOWLEDGE = """
 [스킬]
 - 스킬트리: 스킬 레벨 + 트라이포드 구성의 전체 목록을 의미. 단일 값이 아니라 여러 스킬 행의 리스트 → response_format은 반드시 LIST.
   예) "고기 워로드가 많이 쓰는 스킬트리" → GLOBAL_SKILL, LIST
@@ -80,3 +80,29 @@ GAME_KNOWLEDGE = """
   등급 표기 순서: 상 > 중 > 하
   ※ "상상"은 한국어 단어 '상상(imagination)'이 아니라 장신구 옵션 등급 표현임.
 """.strip()
+
+_TFT_KNOWLEDGE = """
+[챔피언]
+- 비용(코스트)에 따라 1~5코스트로 구분됨.
+- 3성 달성 시 능력치가 크게 상승.
+
+[특성]
+- 챔피언 조합으로 활성화되며, 활성화 단계(예: 2/4/6)에 따라 효과가 달라짐.
+
+[증강체]
+- 라운드 중 선택하는 강화 효과. 실버/골드/프리즘 등급으로 구분.
+
+[덱/조합]
+- 메타 덱은 시즌/패치마다 변동됨.
+""".strip()
+
+_KNOWLEDGE_MAP: dict[str, str] = {
+    "LOSTARK": _LOSTARK_KNOWLEDGE,
+    "TFT": _TFT_KNOWLEDGE,
+}
+
+GAME_KNOWLEDGE = _LOSTARK_KNOWLEDGE
+
+
+def get_game_knowledge(game_type: str) -> str:
+    return _KNOWLEDGE_MAP.get(game_type, "")

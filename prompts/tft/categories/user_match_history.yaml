@@ -1,0 +1,31 @@
+category_name: "USER_MATCH_HISTORY"
+
+rules: |
+  - 사용 테이블:
+    - `tft.tft_acc_tb`               : 유저 계정 (user_name, tag_line, puuid)
+    - `tft.match_participant_info_tb` : 게임 참여 정보 (puuid, match_id, placement, level, last_round, time_eliminated)
+    - `tft.match_info_tb`             : 게임 정보 (match_id, game_datetime, tft_game_type)
+
+  - [유저 식별 패턴]
+    - 닉네임은 "이름#태그" 형식. WHERE 조건에서 반드시 user_name과 tag_line을 분리하여 사용.
+      WHERE a.user_name = '이름' AND a.tag_line = '태그'
+
+  - [전적 조회 패턴]
+    - tft_acc_tb에서 puuid 조회 → match_participant_info_tb와 JOIN → match_info_tb와 JOIN.
+      SELECT
+          m.game_datetime,
+          m.tft_game_type,
+          p.placement,
+          p.level,
+          p.last_round,
+          p.time_eliminated
+      FROM tft.tft_acc_tb a
+      JOIN tft.match_participant_info_tb p ON a.puuid = p.puuid
+      JOIN tft.match_info_tb m ON p.match_id = m.match_id
+      WHERE a.user_name = '{이름}' AND a.tag_line = '{태그}'
+      ORDER BY m.game_datetime DESC
+      LIMIT 10
+
+  - [필터링]
+    - 특정 게임 모드만 조회 시: WHERE m.tft_game_type = '모드명' 조건 추가.
+    - 최근 N게임: LIMIT N.

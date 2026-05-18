@@ -1,0 +1,24 @@
+sql_basics: |
+  - 테이블 접두사는 tft.를 사용한다.
+  - JOIN 시 컬럼은 반드시 테이블 alias를 명시한다.
+  - 결과는 기본적으로 LIMIT 10 이하로 제한한다.
+
+dynamic_table_rules: |
+  - [최신 패치 조회] 메타 데이터 조회 시 항상 최신 패치 CTE를 먼저 구성하라.
+      WITH latest_patch AS (
+          SELECT MAX(patch_version) AS current_patch
+          FROM tft.metatft_comps
+      )
+      ... JOIN latest_patch lp ON c.patch_version = lp.current_patch
+  - [최신 유닛 메타] unit_meta_tb 조회 시: ORDER BY fetched_at DESC LIMIT 1 패턴 사용.
+  - [증강체 덱] metatft_pro_comps_augments도 동일하게 latest_patch CTE 적용.
+
+syntax_rules: |
+  - [배열 검색] traits는 text[] 배열. 단일 값 검색: ANY() 구문, 다중 포함 검색: @> 연산자.
+      예) t.eng_name = ANY(u.traits)
+      예) compositions @> ARRAY['BFSword', 'NeedlesslyLargeRod']::text[]
+  - [정규식 추출] 기물 이름 바로 뒤 괄호 안 아이템 추출:
+      SUBSTRING(col FROM '기물명\s*\(([^)]+)\)')
+  - [ILIKE 검색] 기물명/아이템명/증강체명 포함 여부: col ILIKE '%이름%' 패턴 사용.
+  - [중복 제거] 덱별 최상위 티어 1건만: ROW_NUMBER() OVER(PARTITION BY comp_name ORDER BY CASE tier ...) 패턴.
+  - [유저 식별] 유저는 user_name + tag_line 조합으로 특정. "이름#태그" 형식을 분리하여 사용.

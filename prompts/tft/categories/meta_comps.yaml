@@ -1,0 +1,39 @@
+category_name: "META_COMPS"
+
+rules: |
+  - 사용 테이블:
+    - `tft.metatft_comps` : 메타 덱 조합 (patch_version, tier, comp_name, avg_place, pick_rate, win_rate, top4_rate, traits, champs_items, tags)
+
+  - [컬럼 의미]
+    - tier: 덱 티어 ('S', 'A', 'B', 'C', 'D')
+    - comp_name: 덱/조합 이름
+    - avg_place: 평균 등수 (낮을수록 좋음)
+    - pick_rate: 픽률
+    - win_rate: 1등 비율
+    - top4_rate: 4위 이내 비율 (순방률)
+    - champs_items: "기물명(아이템1, 아이템2), ..." 형식의 문자열
+    - tags: 덱 플레이 스타일 태그 (예: '7레벨', '리롤', '빠른 8강')
+
+  - [최신 패치 필수 패턴]
+    WITH latest_patch AS (
+        SELECT MAX(patch_version) AS current_patch
+        FROM tft.metatft_comps
+    )
+    SELECT ... FROM tft.metatft_comps c
+    JOIN latest_patch lp ON c.patch_version = lp.current_patch
+
+  - [기본 정렬]
+    - 성능 순: tier ASC (S→A→...), avg_place ASC
+    - tier 정렬 시 CASE WHEN 사용: CASE tier WHEN 'S' THEN 1 WHEN 'A' THEN 2 ... END
+
+  - [기물/아이템 포함 덱 조회 - FILTER / FILTER_BY_ITEM]
+    - 단일 조건: WHERE c.champs_items ILIKE '%기물명%'
+    - 다중 조건 (AND): WHERE c.champs_items ILIKE '%기물A%' AND c.champs_items ILIKE '%기물B%'
+
+  - [태그 기반 조회 - FILTER_TAGS]
+    - WHERE c.tags ILIKE '%태그명%'
+    - 예) 7렙 리롤: WHERE c.tags ILIKE '%7레벨%'
+
+  - [티어 필터]
+    - 상위 메타만: WHERE c.tier IN ('S', 'A')
+    - 특정 티어: WHERE c.tier = 'S'

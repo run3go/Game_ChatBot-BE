@@ -1,0 +1,41 @@
+category_name: "BENCH_RECOMMENDATION"
+
+rules: |
+  - 사용 테이블:
+    - `tft.metatft_comps` : 메타 덱 조합 (patch_version, tier, comp_name, champs_items, avg_place, win_rate)
+
+  - [대기석 기물 기반 덱 추천 패턴 - MULTI_UNIT_MATCHING]
+    - 보유 기물 각각에 대해 champs_items 포함 여부를 점수화(1점씩) → match_score.
+    - 점수 높은 덱이 보유 기물을 가장 많이 활용하는 덱.
+
+    WITH latest_patch AS (
+        SELECT MAX(patch_version) AS current_patch
+        FROM tft.metatft_comps
+    ),
+    scored_comps AS (
+        SELECT
+            c.tier,
+            c.comp_name,
+            c.champs_items,
+            c.avg_place,
+            c.win_rate,
+            (
+                (CASE WHEN c.champs_items ILIKE '%{기물1}%' THEN 1 ELSE 0 END) +
+                (CASE WHEN c.champs_items ILIKE '%{기물2}%' THEN 1 ELSE 0 END) +
+                ...
+            ) AS match_score
+        FROM tft.metatft_comps c
+        JOIN latest_patch lp ON c.patch_version = lp.current_patch
+    )
+    SELECT tier, comp_name, match_score, champs_items, avg_place, win_rate
+    FROM scored_comps
+    WHERE match_score >= 1
+    ORDER BY
+        match_score DESC,
+        CASE tier WHEN 'S' THEN 1 WHEN 'A' THEN 2 WHEN 'B' THEN 3 ELSE 4 END ASC,
+        avg_place ASC
+    LIMIT 5
+
+  - [기물 수에 따라 CASE WHEN 블록 수 조정]
+    - 질문에 언급된 기물 수만큼 CASE WHEN 블록을 반복.
+    - "N성"은 무시하고 기물명만 추출. 예) "트페 2성" → '트페'

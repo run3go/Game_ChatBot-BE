@@ -1,0 +1,82 @@
+category_rules: |
+  [CATEGORY_TYPE]
+  질문 의도와 키워드로 카테고리를 결정한다.
+
+  - USER_MATCH_HISTORY: 특정 유저(닉네임#태그 형식)의 전적, 순위, 최근 게임 기록 조회.
+    트리거: {전적, 최근 게임, 전적 보여줘, 몇 등 했어, 랭크 게임}
+    예) "너무해너무햄#KR1 전적 보여줘" → USER_MATCH_HISTORY
+
+  - META_COMPS: 현재 메타 덱/조합 조회, 특정 기물·아이템·태그 기반 덱 필터링.
+    트리거: {메타 덱, 조합, 어떤 덱, 덱 추천, 티어, 승률 좋은 덱, S티어}
+    예) "현재 메타 덱 알려줘" → META_COMPS
+    예) "피즈 포함된 덱" → META_COMPS
+    예) "7렙 리롤덱 추천" → META_COMPS (tags 필터)
+    예) "피바라기 쓰는 덱" → META_COMPS (아이템 기반 필터)
+
+  - UNIT_INFO: 특정 기물의 시너지, 특성, 스탯, 설명 조회.
+    트리거: {시너지, 특성, 기물 정보, 스탯}
+    예) "벨베스 시너지 뭐야" → UNIT_INFO
+
+  - UNIT_ITEM_RECOMMENDATION: 특정 기물에게 추천하는 아이템 조회.
+    트리거: {추천템, 추천 아이템, 어떤 템, 뭐 줘야 해, 아이템 추천}
+    예) "카이사 추천템" → UNIT_ITEM_RECOMMENDATION
+
+  - COMPARE_PERFORMANCE: 두 기물 또는 두 아이템의 성능·승률 비교.
+    트리거: {비교, 누가 더, 어느게 더, A vs B, 승률 비교}
+    예) "구인수는 자야랑 르블랑 중 누구 주는 게 승률 좋아?" → COMPARE_PERFORMANCE
+
+  - AUGMENT_COMPS: 특정 증강체를 선택했을 때 추천 덱 조회.
+    트리거: {증강체, 증강 골랐는데, 증강 있을 때, 증강체 덱}
+    예) "보석 연꽃 골랐는데 어떤 덱" → AUGMENT_COMPS
+
+  - BENCH_RECOMMENDATION: 대기석에 보유한 기물 기반 최적 덱 추천.
+    트리거: {대기석, 갖고 있는 기물, 보유 기물, 어떤 덱 가야 해}
+    예) "대기석에 마스터이, 빅토르, 파이크 있는데 어떤 덱" → BENCH_RECOMMENDATION
+
+  - ITEM_BUILDUP_COMPS: 보유 기본 아이템/재료로 만들 수 있는 완성템 + 추천 덱 조회.
+    트리거: {빌드업, 아이템 있는데, 재료 있는데, 뭐 만들 수 있어, 어울리는 기물}
+    예) "곡궁이랑 쓸데없이 큰 지팡이 있는데 어떤 덱" → ITEM_BUILDUP_COMPS
+
+  - GENERAL: 게임 규칙 설명, 일반 대화, 위 카테고리에 해당하지 않는 질문.
+
+nickname_rules: |
+  [유저 식별자 추출]
+  - TFT 유저 식별자는 "이름#태그" 형식. 이름은 한글·영문·숫자·공백을 포함할 수 있고, 태그는 영문+숫자 조합이다.
+  - 질문에서 "#" 기호가 보이면 "#" 앞의 모든 단어(공백 포함)와 "#태그"를 합쳐 하나의 소환사명으로 취급한다.
+  - nicknames에는 "이름#태그" 전체 문자열을 그대로 저장한다.
+  - 이름 부분이 공백을 포함하더라도 분리하지 않는다.
+    예) "너무해너무햄#KR1 전적 보여줘" → nicknames=["너무해너무햄#KR1"]
+    예) "빨리 따라와#KR1의 전적 알려줘" → nicknames=["빨리 따라와#KR1"]
+    예) "hello world#NA1 최근 게임" → nicknames=["hello world#NA1"]
+  - USER_MATCH_HISTORY 카테고리에서만 nicknames를 추출. 나머지 카테고리는 nicknames=[].
+  - SQL 생성 시 "#" 기준으로 user_name과 tag_line으로 분리하여 사용.
+
+response_format_rules: |
+  [response_format]
+  - LIST: 단순 목록 조회 (메타 덱 목록, 전적 목록 등).
+  - FILTER: 특정 기물·아이템·태그 조건으로 필터링된 덱 조회.
+  - JOIN_ARRAY: 배열(traits) JOIN이 필요한 기물 시너지 조회.
+  - REGEX_EXTRACT: 정규식으로 기물별 아이템 추출.
+  - FILTER_TAGS: tags 컬럼 기반 플레이 스타일 필터링.
+  - FILTER_BY_ITEM: champs_items에서 아이템명으로 덱 필터링.
+  - FILTER_BY_AUGMENT_UNIQUE: 증강체 포함 덱, ROW_NUMBER 중복 제거.
+  - MULTI_UNIT_MATCHING: 다중 기물 매칭 스코어 기반 덱 추천.
+  - COMBINE_ITEM_AND_SEARCH: 기본 아이템 → 완성템 → 덱 검색 3단계.
+  - TEXT: SQL 불필요, 게임 지식으로 텍스트 답변.
+
+  판별 가이드:
+  - 카테고리가 USER_MATCH_HISTORY → LIST
+  - 카테고리가 META_COMPS + 기물/아이템 언급 → FILTER 또는 FILTER_BY_ITEM
+  - 카테고리가 META_COMPS + 플레이 스타일 언급 (7렙, 리롤 등) → FILTER_TAGS
+  - 카테고리가 UNIT_INFO → JOIN_ARRAY
+  - 카테고리가 UNIT_ITEM_RECOMMENDATION → REGEX_EXTRACT
+  - 카테고리가 COMPARE_PERFORMANCE → REGEX_EXTRACT (정규식으로 각 기물 아이템 추출 후 비교)
+  - 카테고리가 AUGMENT_COMPS → FILTER_BY_AUGMENT_UNIQUE
+  - 카테고리가 BENCH_RECOMMENDATION → MULTI_UNIT_MATCHING
+  - 카테고리가 ITEM_BUILDUP_COMPS → COMBINE_ITEM_AND_SEARCH
+  - 카테고리가 GENERAL → TEXT
+
+followup_rules: |
+  [후속 질문 처리]
+  - 이전 대화에서 언급된 덱명이나 기물명이 있으면 해당 맥락을 이어받아 처리.
+  - "그거", "그 덱", "방금 거" 등 지시어는 이전 대화의 comp_name으로 해석.

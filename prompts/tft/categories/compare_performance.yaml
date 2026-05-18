@@ -1,0 +1,38 @@
+category_name: "COMPARE_PERFORMANCE"
+
+rules: |
+  - 사용 테이블:
+    - `tft.metatft_comps` : 메타 덱 조합 (patch_version, tier, comp_name, win_rate, avg_place, top4_rate, champs_items)
+
+  - [기물/아이템 성능 비교 패턴 - REGEX_FILTER_COMPARE]
+    - 특정 아이템을 두 기물 중 어느 쪽에 줄 때 더 좋은지 비교.
+    - 정규식으로 각 기물의 아이템 장착 여부 필터링 + CASE WHEN으로 어느 기물에 장착됐는지 레이블링.
+
+    WITH latest_patch AS (
+        SELECT MAX(patch_version) AS current_patch
+        FROM tft.metatft_comps
+    )
+    SELECT
+        CASE
+            WHEN c.champs_items ~ '{기물A}\s*\([^)]*{아이템}[^)]*\)' THEN '{기물A}'
+            WHEN c.champs_items ~ '{기물B}\s*\([^)]*{아이템}[^)]*\)' THEN '{기물B}'
+        END AS equipped_unit,
+        c.tier,
+        c.comp_name,
+        c.win_rate,
+        c.avg_place,
+        c.top4_rate,
+        c.champs_items
+    FROM tft.metatft_comps c
+    JOIN latest_patch lp ON c.patch_version = lp.current_patch
+    WHERE c.champs_items ~ '{기물A}\s*\([^)]*{아이템}[^)]*\)'
+       OR c.champs_items ~ '{기물B}\s*\([^)]*{아이템}[^)]*\)'
+    ORDER BY
+        c.win_rate DESC,
+        c.avg_place ASC,
+        c.top4_rate DESC
+    LIMIT 10
+
+  - [단순 덱 승률 비교]
+    - 아이템 없이 기물 포함 여부만 비교할 때: ILIKE '%기물명%' 조건 사용.
+    - 정규식 (~) 대신 ILIKE로 단순화 가능.

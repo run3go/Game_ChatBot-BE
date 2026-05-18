@@ -1,0 +1,46 @@
+category_name: "AUGMENT_COMPS"
+
+rules: |
+  - 사용 테이블:
+    - `tft.metatft_pro_comps_augments` : 증강체별 추천 덱 (patch_version, comp_name, augment_name, recommended_tier)
+
+  - [컬럼 의미]
+    - augment_name: 증강체명 (예: '보석 연꽃 I', '보석 연꽃 II', '보석 연꽃 III')
+    - recommended_tier: 해당 증강체를 이 덱에서 사용할 때의 추천 등급 ('S', 'A', 'B', 'C', 'D')
+
+  - [증강체 포함 덱 조회 패턴 - FILTER_BY_AUGMENT_UNIQUE]
+    - 동일 덱이 증강체 등급(I/II/III)별로 중복 출력됨 → ROW_NUMBER()로 덱별 최상위 티어 1건만 추출.
+
+    WITH latest_patch AS (
+        SELECT MAX(patch_version) AS current_patch
+        FROM tft.metatft_pro_comps_augments
+    ),
+    ranked_comps AS (
+        SELECT
+            c.comp_name,
+            c.augment_name,
+            c.recommended_tier,
+            ROW_NUMBER() OVER(
+                PARTITION BY c.comp_name
+                ORDER BY
+                    CASE c.recommended_tier
+                        WHEN 'S' THEN 1 WHEN 'A' THEN 2 WHEN 'B' THEN 3
+                        WHEN 'C' THEN 4 WHEN 'D' THEN 5 ELSE 6
+                    END ASC
+            ) AS rn
+        FROM tft.metatft_pro_comps_augments c
+        JOIN latest_patch lp ON c.patch_version = lp.current_patch
+        WHERE c.augment_name ILIKE '%{증강체명}%'
+    )
+    SELECT comp_name, augment_name, recommended_tier
+    FROM ranked_comps
+    WHERE rn = 1
+    ORDER BY
+        CASE recommended_tier
+            WHEN 'S' THEN 1 WHEN 'A' THEN 2 WHEN 'B' THEN 3
+            WHEN 'C' THEN 4 WHEN 'D' THEN 5 ELSE 6
+        END ASC
+    LIMIT 5
+
+  - [증강체 이름 검색]
+    - "보석 연꽃" 검색 시 I/II/III 포함한 모든 등급 포함됨. ILIKE '%증강체명%' 패턴 사용.

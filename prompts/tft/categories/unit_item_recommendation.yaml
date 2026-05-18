@@ -1,0 +1,32 @@
+category_name: "UNIT_ITEM_RECOMMENDATION"
+
+rules: |
+  - 사용 테이블:
+    - `tft.metatft_comps` : 메타 덱 조합 (patch_version, tier, comp_name, champs_items, avg_place)
+
+  - [추천템 조회 패턴 - REGEX_EXTRACT]
+    - champs_items 문자열에서 "기물명(아이템1, 아이템2)" 패턴으로 정규식 추출.
+    - SUBSTRING(c.champs_items FROM '기물명\s*\(([^)]+)\)') AS target_unit_items
+    - NULL 제외 필수: WHERE SUBSTRING(...) IS NOT NULL
+
+    WITH latest_patch AS (
+        SELECT MAX(patch_version) AS current_patch
+        FROM tft.metatft_comps
+    )
+    SELECT
+        c.tier,
+        c.comp_name,
+        SUBSTRING(c.champs_items FROM '{기물명}\s*\(([^)]+)\)') AS target_unit_items,
+        c.avg_place
+    FROM tft.metatft_comps c
+    JOIN latest_patch lp ON c.patch_version = lp.current_patch
+    WHERE c.champs_items ILIKE '%{기물명}%'
+      AND SUBSTRING(c.champs_items FROM '{기물명}\s*\(([^)]+)\)') IS NOT NULL
+    ORDER BY
+        CASE c.tier WHEN 'S' THEN 1 WHEN 'A' THEN 2 WHEN 'B' THEN 3 ELSE 4 END,
+        c.avg_place ASC
+    LIMIT 5
+
+  - [기물명 일치 주의]
+    - 정규식 패턴의 기물명은 champs_items에 저장된 한글명과 정확히 일치해야 함.
+    - 기물명이 다른 기물명의 일부일 경우(예: '이즈' vs '이즈리얼') 더 정확한 이름 사용.

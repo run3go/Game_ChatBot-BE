@@ -1,0 +1,28 @@
+category_name: "UNIT_INFO"
+
+rules: |
+  - 사용 테이블:
+    - `tft.unit_meta_tb`  : 기물 메타 (kor_name, eng_name, traits[text[]], fetched_at)
+    - `tft.trait_meta_tb` : 특성/시너지 메타 (kor_name, eng_name, description)
+
+  - [기물 조회 패턴]
+    - 최신 데이터: WHERE kor_name = '{기물명}' ORDER BY fetched_at DESC LIMIT 1
+    - 이름 부분 일치: WHERE kor_name ILIKE '%검색어%'
+
+  - [시너지 조회 패턴 - JOIN_ARRAY]
+    - unit_meta_tb의 traits(text[]) 배열과 trait_meta_tb의 eng_name을 ANY()로 조인.
+      WITH target_unit AS (
+          SELECT traits
+          FROM tft.unit_meta_tb
+          WHERE kor_name = '{기물명}'
+          ORDER BY fetched_at DESC
+          LIMIT 1
+      )
+      SELECT
+          t.kor_name AS trait_name,
+          t.description AS trait_description
+      FROM tft.trait_meta_tb t
+      JOIN target_unit u ON t.eng_name = ANY(u.traits)
+
+  - [특성 필터]
+    - 특정 시너지 보유 기물 조회: WHERE '{시너지영문명}' = ANY(traits)

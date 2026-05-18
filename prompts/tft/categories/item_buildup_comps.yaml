@@ -1,0 +1,53 @@
+category_name: "ITEM_BUILDUP_COMPS"
+
+rules: |
+  - 사용 테이블:
+    - `tft.item_meta_tb`  : 아이템 메타 (kor_name, eng_name, compositions[text[]])
+    - `tft.metatft_comps` : 메타 덱 조합 (patch_version, tier, comp_name, champs_items, win_rate, avg_place)
+
+  - [컬럼 의미 - item_meta_tb]
+    - kor_name: 아이템 한글명
+    - eng_name: 아이템 영문명
+    - compositions: 이 완성템을 만드는 기본 아이템 영문명 배열 (예: ['BFSword', 'NeedlesslyLargeRod'])
+    - compositions 배열 크기가 2인 행이 완성 아이템.
+
+  - [아이템 빌드업 패턴 - COMBINE_ITEM_AND_SEARCH (3단계)]
+
+    1단계) 기본 아이템 영문명 추출:
+    WITH base_items AS (
+        SELECT eng_name
+        FROM tft.item_meta_tb
+        WHERE kor_name IN ('{기본아이템1}', '{기본아이템2}')
+    ),
+
+    2단계) 두 기본 아이템으로 만들 수 있는 완성 아이템 조회:
+    crafted_item AS (
+        SELECT kor_name AS crafted_item_name
+        FROM tft.item_meta_tb
+        WHERE compositions @> ARRAY(SELECT eng_name FROM base_items)::text[]
+          AND array_length(compositions, 1) = 2
+        LIMIT 1
+    ),
+
+    3단계) 완성 아이템 포함 덱 조회:
+    latest_patch AS (
+        SELECT MAX(patch_version) AS current_patch
+        FROM tft.metatft_comps
+    )
+    SELECT
+        ci.crafted_item_name AS made_item,
+        c.tier,
+        c.comp_name,
+        c.champs_items,
+        c.win_rate,
+        c.avg_place
+    FROM tft.metatft_comps c
+    CROSS JOIN crafted_item ci
+    JOIN latest_patch lp ON c.patch_version = lp.current_patch
+    WHERE c.champs_items ILIKE '%' || ci.crafted_item_name || '%'
+    ORDER BY c.win_rate DESC, c.avg_place ASC
+    LIMIT 10
+
+  - [기본 아이템 이름 주의]
+    - kor_name으로 검색. 정확한 아이템 한글명 사용 (예: '곡궁', '쓸데없이 큰 지팡이').
+    - 완성 아이템이 없으면 빈 결과 → 아이템 조합이 불가능한 경우.

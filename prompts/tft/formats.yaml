@@ -1,0 +1,29 @@
+response_format_rules:
+  LIST: "단순 목록 조회. 최신 패치 CTE + 티어/평균 등수 기준 정렬."
+  FILTER: "조건 필터 조회. champs_items 또는 tags 컬럼에 ILIKE 필터 적용."
+  JOIN_ARRAY: |
+    배열 JOIN 조회.
+    - traits(text[]) → ANY() 구문으로 trait_meta_tb의 eng_name과 조인.
+    - 예) JOIN trait_meta_tb t ON t.eng_name = ANY(u.traits)
+  REGEX_EXTRACT: |
+    정규식 추출.
+    - 특정 기물 이름 바로 뒤 괄호 안 아이템 목록 추출.
+    - 패턴: SUBSTRING(champs_items FROM '기물명\s*\(([^)]+)\)')
+    - NULL 제외 조건 필수: WHERE SUBSTRING(...) IS NOT NULL
+  FILTER_TAGS: "태그 기반 필터. tags 컬럼에 ILIKE '%태그명%' 검색으로 플레이 스타일 필터링."
+  FILTER_BY_ITEM: "아이템 기반 필터. champs_items에서 특정 아이템명 ILIKE 검색으로 해당 아이템 채용 덱 조회."
+  FILTER_BY_AUGMENT_UNIQUE: |
+    증강체 중복 제거 조회.
+    - metatft_pro_comps_augments에서 특정 증강체(ILIKE '%이름%') 포함 덱 조회.
+    - 동일 덱이 증강체 I/II/III 등으로 중복 출력되므로 ROW_NUMBER()로 덱별 최상위 티어 1건만 추출.
+    - 티어 정렬 CASE: S=1, A=2, B=3, C=4, D=5
+  MULTI_UNIT_MATCHING: |
+    다중 기물 매칭 스코어링.
+    - 보유 기물 각각에 대해 CASE WHEN champs_items ILIKE '%기물명%' THEN 1 ELSE 0 END 합산 → match_score.
+    - WHERE match_score >= 1 필터 후 match_score DESC → 티어 순 → avg_place ASC 정렬.
+  COMBINE_ITEM_AND_SEARCH: |
+    아이템 조합 후 덱 검색 (3단계).
+    1. base_items CTE: item_meta_tb에서 기본 아이템 영문명 추출.
+    2. crafted_item CTE: compositions @> ARRAY(...) 로 완성 아이템 한글명 조회.
+    3. metatft_comps에서 완성 아이템명 ILIKE 검색으로 덱 조회.
+  TEXT: "SQL 없이 게임 지식 기반으로 텍스트 답변."
