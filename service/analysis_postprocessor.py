@@ -1,6 +1,7 @@
 from constants import DISPLAY_TRIGGERS, POSTPOSITIONS, DISPLAY_STRIP_WORDS
 from llm.embedding_lookup_retriever import EMBEDDING_LOOKUP
-from output_types import QuestionAnalysis
+_LOSTARK_LOOKUP = EMBEDDING_LOOKUP["LOSTARK"]
+from output_types import LOSTARKAnalysis, QuestionAnalysis
 
 _CROSS_CATEGORY_TYPES = {"CLASS", "ARK_PASSIVE_CLASS"}
 
@@ -25,19 +26,27 @@ def post_process(
     analysis: QuestionAnalysis,
     lookup_entries: list[dict],
     excluded_nickname_terms: set,
+    lookup=None,
 ) -> tuple[QuestionAnalysis, list[dict], str, set, set]:
     """분석 결과 후처리. (analysis, filtered_entries, abbr_hints, remaining_words, all_triggers) 반환"""
 
     if analysis.nicknames and excluded_nickname_terms:
         analysis.nicknames = [n for n in analysis.nicknames if n not in excluded_nickname_terms]
 
+    if not isinstance(analysis, LOSTARKAnalysis):
+        if lookup_entries and lookup is not None:
+            filtered = lookup.filter_subsumed(question, lookup_entries)
+            abbr_hints = lookup.format_term_hints(question, filtered)
+            return analysis, filtered, abbr_hints, set(), set()
+        return analysis, [], "", set(), set()
+
     if analysis.nicknames and analysis.category.startswith("GLOBAL_"):
         analysis.category = analysis.category[len("GLOBAL_"):]
 
     allowed_types = _CROSS_CATEGORY_TYPES | _CATEGORY_SUBJECT_TYPES.get(analysis.category, set())
     filtered_entries = [e for e in lookup_entries if e.get("type") in allowed_types]
-    filtered_entries = EMBEDDING_LOOKUP.filter_subsumed(question, filtered_entries)
-    abbr_hints = EMBEDDING_LOOKUP.format_term_hints(question, filtered_entries)
+    filtered_entries = _LOSTARK_LOOKUP.filter_subsumed(question, filtered_entries)
+    abbr_hints = _LOSTARK_LOOKUP.format_term_hints(question, filtered_entries)
 
     q = question
     for nick in (analysis.nicknames or []):

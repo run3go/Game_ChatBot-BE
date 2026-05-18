@@ -72,6 +72,20 @@ class ChatService:
         ).mappings().all()
         return [{"role": r["role"], "content": r["content"], "result_json": r["result_json"], "nicknames": r["nicknames"], "sql_query": r["sql_query"]} for r in rows]
 
+    def get_game_type(self, chat_id: str) -> str | None:
+        row = self.db.execute(
+            text("SELECT game_type FROM public.chat_sessions_tb WHERE chat_id = :chat_id"),
+            {"chat_id": chat_id},
+        ).first()
+        return row[0] if row else None
+
+    def update_game_type(self, chat_id: str, game_type: str):
+        self.db.execute(
+            text("UPDATE public.chat_sessions_tb SET game_type = :game_type WHERE chat_id = :chat_id"),
+            {"game_type": game_type, "chat_id": chat_id},
+        )
+        self.db.commit()
+
     def get_summary(self, chat_id: str) -> str | None:
         row = self.db.execute(
             text("SELECT summary FROM public.chat_sessions_tb WHERE chat_id = :chat_id"),
@@ -111,7 +125,7 @@ class ChatService:
             return question[:10]
 
         prompt = ChatPromptTemplate.from_template("""
-            다음은 로스트아크 게임 챗봇에 대한 사용자의 첫 질문이야.
+            다음은 게임 챗봇에 대한 사용자의 첫 질문이야.
             5~10글자로 간단한 제목을 만들어줘. 마침표나 특수문자는 빼줘.
 
             [질문]
@@ -160,9 +174,9 @@ class ChatService:
         )
 
         prompt = ChatPromptTemplate.from_template("""
-            다음은 로스트아크 게임 챗봇의 대화 내용이야.
+            다음은 게임 챗봇의 대화 내용이야.
             핵심만 3~5문장으로 한국어 요약을 작성해.
-            어떤 캐릭터에 대해 어떤 정보를 물었는지를 중심으로 정리해.
+            사용자가 어떤 정보를 물었는지를 중심으로 정리해.
 
             [대화]
             {history}

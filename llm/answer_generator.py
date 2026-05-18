@@ -4,7 +4,7 @@ import logging
 from datetime import datetime, date
 from langchain_core.prompts import ChatPromptTemplate
 from utils.chat_utils import format_history
-from prompts.game_knowledge import GAME_KNOWLEDGE
+from prompts.game_knowledge import get_game_knowledge
 from llm.llm_monitor import log_llm_call, TokenCountCallback
 
 logger = logging.getLogger(__name__)
@@ -67,9 +67,9 @@ class AnswerGenerator:
             )
             yield "잠시 후 다시 시도해 주세요."
 
-    def answer_general(self, question: str, history: list[dict] | None = None):
+    def answer_general(self, question: str, history: list[dict] | None = None, game_type: str = "LOSTARK"):
         prompt = ChatPromptTemplate.from_template("""
-            너는 로스트아크 AI 비서야.
+            너는 게임 AI 비서야.
             DB 조회 없이 게임 지식을 바탕으로 질문에 답해.
             답변은 간결하고 정확하게 마크다운 형식으로 작성해.
             이전 대화 맥락을 반드시 참고해서 답해.
@@ -90,12 +90,12 @@ class AnswerGenerator:
         yield from self._stream_with_monitor(self._chain(prompt), {
             "question": question,
             "history": self._history(history),
-            "game_knowledge": GAME_KNOWLEDGE,
+            "game_knowledge": get_game_knowledge(game_type),
         }, "answer_general", detail)
 
     def answer_display(self, question: str, ui_type: str, data: dict, history: list[dict] | None = None):
         prompt = ChatPromptTemplate.from_template("""
-            너는 로스트아크 AI 비서야.
+            너는 게임 AI 비서야.
             아래 데이터는 이미 UI로 화면에 표시됐어.
             UI 내용을 그대로 나열하지 말고, 핵심 포인트나 주목할 점을 간결하게 코멘트해줘.
             답변은 마크다운 형식으로 작성해.
@@ -125,13 +125,59 @@ class AnswerGenerator:
             "history": self._history(history),
         }, "answer_display", detail)
 
-    def answer(self, question: str, data, history: list[dict] | None = None, category: str = ""):
+    def answer_tft(self, question: str, data: dict, history: list[dict] | None = None):
+        prompt = ChatPromptTemplate.from_template("""
+            너는 롤토체스(TFT) AI 비서야.
+            아래 소환사의 최근 전적 데이터를 바탕으로 자연스럽게 분석해줘.
+            답변은 간결하고 명확하게 마크다운 형식으로 작성해.
+            이전 대화 맥락을 참고해서 답해.
+
+            [게임 은어/약어]
+            {game_knowledge}
+
+            [데이터 필드 설명]
+            - placement: 순위 (1위가 최고, 1~4위=승리, 5~8위=패배)
+            - level: 최종 레벨
+            - augments: 선택한 증강체 목록
+            - traits: 활성화된 특성 목록 (style: 1=브론즈, 2=실버, 3=골드, 4=프리즘)
+            - units: 최종 유닛 목록 (tier: 별 개수)
+            - total_damage_to_players: 플레이어에게 가한 총 피해량
+            - last_round: 마지막 라운드
+
+            [판단 지침]
+            - 전적이 여러 게임이면 승률, 평균 순위, 자주 쓴 덱/특성 위주로 요약해.
+            - 구체적인 증강체/특성/유닛 이름은 그대로 표시해.
+            - 데이터가 비어있으면 "최근 전적이 없습니다"라고 안내해.
+            - 응답을 코드블록(```)으로 감싸지 마. 마크다운을 직접 출력.
+
+            [이전 대화]
+            {history}
+
+            [질문]
+            {question}
+
+            [전적 데이터(JSON)]
+            {data}
+        """)
+        data_json = json.dumps(data, ensure_ascii=False, default=_json_default)
+        detail = {
+            "input": {"data_size": len(data_json)},
+            "method": "answer_tft",
+        }
+        yield from self._stream_with_monitor(self._chain(prompt), {
+            "question": question,
+            "data": data_json,
+            "history": self._history(history),
+            "game_knowledge": get_game_knowledge("TFT"),
+        }, "answer_tft", detail)
+
+    def answer(self, question: str, data, history: list[dict] | None = None, category: str = "", game_type: str = "LOSTARK"):
         data = [dict(row) for row in data]
         if category in {"MARKET", "AUCTION"}:
             data = _strip_datetime_to_date(data)
 
         prompt = ChatPromptTemplate.from_template("""
-            너는 로스트아크 AI 비서야.
+            너는 게임 AI 비서야.
             데이터를 기반으로 자연스럽게 설명해.
 
             [게임 은어/약어]
@@ -215,5 +261,5 @@ class AnswerGenerator:
             "question": question,
             "data": data_json,
             "history": self._history(history),
-            "game_knowledge": GAME_KNOWLEDGE,
+            "game_knowledge": get_game_knowledge(game_type),
         }, "answer", detail)

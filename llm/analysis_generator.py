@@ -1,11 +1,16 @@
 import time
 from langchain_core.prompts import ChatPromptTemplate
-from output_types import QuestionAnalysis
-from prompts.game_knowledge import GAME_KNOWLEDGE
+from output_types import LOSTARKAnalysis, TFTAnalysis, QuestionAnalysis
+from prompts.game_knowledge import get_game_knowledge
 from utils.chat_utils import format_history
 from constants import DISPLAY_TRIGGERS
 from llm.llm_monitor import log_llm_call, TokenCountCallback
 from service.prompt_manager import PromptManager
+
+_ANALYSIS_MODEL: dict = {
+    "LOSTARK": LOSTARKAnalysis,
+    "TFT": TFTAnalysis,
+}
 
 
 def _format_display_triggers() -> str:
@@ -21,10 +26,12 @@ class AnalysisGenerator:
         self.prompt_manager = prompt_manager
         self.model_name = getattr(llm, "model_name", getattr(llm, "model", "unknown"))
 
-    def analyze(self, question: str, history: list[dict] | None = None, candidates: list[str] | None = None, embedding_context: str = "") -> QuestionAnalysis:
+    def analyze(self, question: str, history: list[dict] | None = None, candidates: list[str] | None = None, embedding_context: str = "", game_type: str = "LOSTARK") -> QuestionAnalysis:
+
+        model = _ANALYSIS_MODEL.get(game_type, LOSTARKAnalysis)
 
         if "000" in question and (history is None or len(history) == 0):
-            return QuestionAnalysis(
+            return model(
                 nicknames=[],
                 response_format="TEXT",
                 category="GENERAL",
@@ -32,9 +39,9 @@ class AnalysisGenerator:
                 reask_message="000을 닉네임으로 채워 다시 질문해주세요."
             )
 
-        template = self.prompt_manager.build_analysis_template()
+        template = self.prompt_manager.build_analysis_template(game_type)
         prompt = ChatPromptTemplate.from_template(template)
-        structured_llm = self.llm.with_structured_output(QuestionAnalysis)
+        structured_llm = self.llm.with_structured_output(model)
         chain = (prompt | structured_llm).with_retry(stop_after_attempt=2)
 
         history_text = format_history(history, max_ai_length=200) if history else ""
@@ -43,7 +50,7 @@ class AnalysisGenerator:
             "question": question,
             "history": history_text or "없음",
             "candidates": candidates or [],
-            "game_knowledge": GAME_KNOWLEDGE,
+            "game_knowledge": get_game_knowledge(game_type),
             "embedding_context": embedding_context or "없음",
             "display_triggers": _format_display_triggers(),
         }

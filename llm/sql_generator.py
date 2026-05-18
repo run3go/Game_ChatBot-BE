@@ -28,7 +28,7 @@ class SQLGenerator:
                 src = src.strip()
                 dst = _re.sub(r'\s*\[[^\]]+\]$', '', dst_full).strip()
                 if src != dst:
-                    rules.append(f"- 질문의 '{src}' → '{dst}' ({dst_full.strip()})")
+                    rules.append(f"- SQL WHERE/LIKE 값에서 '{src}' 대신 반드시 '{dst}' 사용 (예: ILIKE '%{dst}%')")
                 name = dst
             else:
                 name = _re.sub(r'\s*\[[^\]]+\]$', '', h).strip()
@@ -41,17 +41,19 @@ class SQLGenerator:
         all_rules = rules + column_hints
         if not all_rules:
             return ""
-        return "[용어 치환 힌트 - 문맥에 맞게 참고]\n" + "\n".join(all_rules)
+        return "[필수 SQL 값 치환 - 반드시 적용]\n" + "\n".join(all_rules)
 
-    def generate(self, question: str, analysis: QuestionAnalysis, schema, nicknames: list[str] | None = None, error: str | None = None, few_shots: str = "", abbr_hints: str = "", auction_conditions: str = "", history: list[dict] | None = None):
-        
+    def generate(self, question: str, analysis: QuestionAnalysis, schema, nicknames: list[str] | None = None, error: str | None = None, few_shots: str = "", abbr_hints: str = "", auction_conditions: str = "", history: list[dict] | None = None, game_type: str = "LOSTARK"):
+        from service.prompt_manager import GAME_NAMES
         dynamic_prompts = self.pm.build_sql_rules(
+            game_type=game_type,
             category=analysis.category,
             response_format=analysis.response_format
         )
+        game_name = GAME_NAMES.get(game_type, game_type)
 
         prompt = ChatPromptTemplate.from_template("""
-            너는 로스트아크 DB 전문가야.                                 
+            너는 {game_name} DB 전문가야.
 
             {common_rules}
 
@@ -125,7 +127,7 @@ class SQLGenerator:
                     "abbr_hints": abbr_hints or "없음",
                     "term_rules": self._build_term_rules(abbr_hints) if abbr_hints else "",
                     "auction_option_hint": f"[경매장 옵션 조건]\n{auction_conditions}\n" if auction_conditions else "",
-
+                    "game_name": game_name,
                     "common_rules": dynamic_prompts["common_rules"],
                     "response_format_rules": dynamic_prompts["response_format_rules"],
                     "category_rules": dynamic_prompts["category_rules"],
@@ -163,18 +165,18 @@ class SQLGenerator:
             )
             raise
 
-    def generate_validated(self, question: str, analysis: QuestionAnalysis, schema: dict, nicknames: list[str] | None = None, few_shots: str = "", all_tables: set | None = None, abbr_hints: str = "", auction_conditions: str = "", history: list[dict] | None = None) -> str:
+    def generate_validated(self, question: str, analysis: QuestionAnalysis, schema: dict, nicknames: list[str] | None = None, few_shots: str = "", all_tables: set | None = None, abbr_hints: str = "", auction_conditions: str = "", history: list[dict] | None = None, game_type: str = "LOSTARK") -> str:
         allowed = all_tables if all_tables is not None else set(schema.keys())
 
         def _check_invalid(sql: str) -> set:
             return {re.sub(r'\W', '', w.split(".")[-1]) for w in sql.split() if "lostark." in w} - allowed
 
-        sql, _ = self.generate(question, analysis, schema, nicknames, few_shots=few_shots, abbr_hints=abbr_hints, auction_conditions=auction_conditions, history=history)
+        sql, _ = self.generate(question, analysis, schema, nicknames, few_shots=few_shots, abbr_hints=abbr_hints, auction_conditions=auction_conditions, history=history, game_type=game_type)
         invalid = _check_invalid(sql)
         if not invalid:
             return sql
 
-        sql, _ = self.generate(question, analysis, schema, nicknames, few_shots=few_shots, abbr_hints=abbr_hints, auction_conditions=auction_conditions, history=history,
+        sql, _ = self.generate(question, analysis, schema, nicknames, few_shots=few_shots, abbr_hints=abbr_hints, auction_conditions=auction_conditions, history=history, game_type=game_type,
                                error=f"허용되지 않은 테이블 사용: {invalid}. 반드시 [스키마]에 있는 테이블만 사용해.")
         invalid = _check_invalid(sql)
         if invalid:

@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 class SQLPipeline:
 
-    def __init__(self, db, sql_generator: SQLGenerator, answer_generator: AnswerGenerator, populator: DataPopulator):
+    def __init__(self, db, sql_generator: SQLGenerator, answer_generator: AnswerGenerator, populator: DataPopulator | None = None):
         self.db = db
         self.sql_generator = sql_generator
         self.answer_generator = answer_generator
@@ -29,6 +29,7 @@ class SQLPipeline:
         history: list[dict],
         lookup_entries: list[dict] | None = None,
         abbr_hints: str = "",
+        game_type: str = "LOSTARK",
     ) -> tuple:
         """SQL 파이프라인 실행. (result, sql) 반환"""
 
@@ -43,8 +44,8 @@ class SQLPipeline:
             data = self.populator.populate(analysis.category, data)
             return {"ui_type": analysis.category, "data": data}, None
 
-        priority_tables = self._build_priority_tables(analysis, lookup_entries)
-        schema = DB_SCHEMA_STORE.get_schema(self.db, priority_tables)
+        priority_tables = self._build_priority_tables(analysis, lookup_entries, game_type)
+        schema = DB_SCHEMA_STORE.get_schema(self.db, priority_tables, game_type=game_type)
 
         retrieval_query = self._normalize_for_retrieval(question, nicknames)
         if history:
@@ -52,9 +53,9 @@ class SQLPipeline:
             if last_user:
                 retrieval_query = last_user + " " + retrieval_query
         retrieval_query += f" {analysis.category} {analysis.response_format}"
-        few_shots = FEW_SHOT_STORE.retrieve(self.db, retrieval_query, category=analysis.category)
+        few_shots = FEW_SHOT_STORE.retrieve(self.db, retrieval_query, category=analysis.category, game_type=game_type)
 
-        all_tables = DB_SCHEMA_STORE.get_all_tables(self.db)
+        all_tables = DB_SCHEMA_STORE.get_all_tables(self.db, game_type=game_type)
         auction_conditions = resolve_auction_options(question) if analysis.category == "AUCTION" else ""
         logger.info("[auction_conditions] category=%s resolved=%r", analysis.category, auction_conditions)
 
@@ -62,10 +63,10 @@ class SQLPipeline:
             question, analysis, schema, nicknames,
             few_shots=few_shots, all_tables=all_tables,
             abbr_hints=abbr_hints, auction_conditions=auction_conditions,
-            history=history,
+            history=history, game_type=game_type,
         )
 
-        result = self._execute_sql(sql, question, analysis, schema, nicknames, few_shots=few_shots, auction_conditions=auction_conditions)
+        result = self._execute_sql(sql, question, analysis, schema, nicknames, few_shots=few_shots, auction_conditions=auction_conditions, game_type=game_type)
 
         if result is None:
             return ["해당 정보를 찾지 못했어요. 질문을 좀 더 구체적으로 해주시면 더 잘 답변드릴 수 있어요."], sql
@@ -81,9 +82,9 @@ class SQLPipeline:
         if analysis.category in {"MARKET", "AUCTION"} and analysis.response_format == "LIST":
             return {"ui_type": analysis.category, "data": [dict(r) for r in result]}, sql
 
-        return self.answer_generator.answer(question, result, history, category=analysis.category), sql
+        return self.answer_generator.answer(question, result, history, category=analysis.category, game_type=game_type), sql
 
-    def _build_priority_tables(self, analysis: QuestionAnalysis, lookup_entries: list[dict] | None) -> list:
+    def _build_priority_tables(self, analysis: QuestionAnalysis, lookup_entries: list[dict] | None, game_type: str = "LOSTARK") -> list:
         seen: set = set()
         tables: list = []
 
@@ -96,7 +97,7 @@ class SQLPipeline:
         if analysis.category in {"MARKET", "AUCTION"}:
             _add(UI_TABLE_MAP.get(analysis.category, []))
         else:
-            _add(DB_SCHEMA_STORE.search(self.db, [analysis.category]))
+            _add(DB_SCHEMA_STORE.search(self.db, [analysis.category], game_type=game_type))
 
         if lookup_entries:
             for entry in lookup_entries:
@@ -111,7 +112,7 @@ class SQLPipeline:
             normalized = normalized.replace(name, placeholder)
         return normalized
 
-    def _execute_sql(self, sql: str, question: str, analysis: QuestionAnalysis, schema, nicknames: list, few_shots: str = "", auction_conditions: str = ""):
+    def _execute_sql(self, sql: str, question: str, analysis: QuestionAnalysis, schema, nicknames: list, few_shots: str = "", auction_conditions: str = "", game_type: str = "LOSTARK"):
         for attempt in range(2):
             try:
                 return self.db.execute(text(sql)).mappings().all()
@@ -124,4 +125,5 @@ class SQLPipeline:
                     error=f"SQL 실행 오류: {str(e.orig)}",
                     few_shots=few_shots,
                     auction_conditions=auction_conditions,
+                    game_type=game_type,
                 )

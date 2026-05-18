@@ -11,6 +11,14 @@ from sqlalchemy.orm import Session
 from database import get_db
 from service.ai_service import AIService
 from service.chat_service import ChatService, run_background_save
+from llm.game_detector import (
+    GameDetector,
+    GAME_NAMES,
+    is_game_switch_reask,
+    extract_game_from_reask,
+    is_affirmative,
+    quick_detect,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +46,7 @@ async def ask_ai_stream(
 ):
     history = None
     is_first_message = False
+    reask_message: str | None = None
 
     if chat_id and user_id:
         svc = ChatService(db)
@@ -47,6 +56,31 @@ async def ask_ai_stream(
         is_first_message = len(recent) == 0
         summary = svc.get_summary(chat_id)
         history = ([{"role": "summary", "content": summary}] if summary else []) + recent
+
+        game_detector: GameDetector = request.app.state.game_detector
+        game_type = svc.get_game_type(chat_id)
+
+        if history and is_game_switch_reask(history):
+            # 직전 AI 메시지가 게임 전환 재질문이었던 경우
+            if is_affirmative(question):
+                new_game = extract_game_from_reask(history)
+                if new_game != "UNKNOWN":
+                    svc.update_game_type(chat_id, new_game)
+                    game_type = new_game
+        else:
+            if game_type is None:
+                # 첫 질문 — 키워드/패턴으로 먼저 시도, 불명확하면 LLM으로 확정
+                detected = quick_detect(question) or game_detector.detect(question)
+                if detected != "UNKNOWN":
+                    svc.update_game_type(chat_id, detected)
+                    game_type = detected
+            else:
+                # 게임 이미 확정 — 키워드 체크 후 다른 게임일 때만 LLM 호출
+                quick = quick_detect(question)
+                if quick is not None and quick != game_type:
+                    detected = game_detector.detect(question)
+                    if detected != "UNKNOWN" and detected != game_type:
+                        reask_message = f"혹시 {GAME_NAMES[detected]} 관련 질문인가요?"
 
     if user_id:
         row = db.execute(
@@ -62,7 +96,7 @@ async def ask_ai_stream(
 
         if row is None:
             raise HTTPException(status_code=429, detail="오늘의 질문 횟수를 모두 사용했어요.")
-            
+
     answer_parts: list[str] = []
     structured_result: list = []
     generated_title: list[str] = []
@@ -72,8 +106,16 @@ async def ask_ai_stream(
     async def generate():
         result = None
         result_text = None
+
+        # 게임 전환 재질문
+        if reask_message:
+            answer_parts.append(reask_message)
+            yield f"data: {json.dumps({'type': 'text', 'content': reask_message})}\n\n"
+            yield "data: [DONE]\n\n"
+            return
+
         try:
-            for event_type, event_data in ai_service.ask(question, history):
+            for event_type, event_data in ai_service.ask(question, history, game_type=game_type or "UNKNOWN"):
                 if await request.is_disconnected():
                     logger.info("클라이언트 연결 끊김 (chat_id=%s)", chat_id)
                     return

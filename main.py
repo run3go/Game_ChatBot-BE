@@ -1,10 +1,10 @@
-import logging
-from contextlib import asynccontextmanager
-from llm.factory import create_llm_instances
-
 from dotenv import load_dotenv
 
 load_dotenv()
+
+import logging
+from contextlib import asynccontextmanager
+from llm.factory import create_llm_instances
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,6 +13,7 @@ from service.prompt_manager import PromptManager
 from llm.sql_generator import SQLGenerator
 from llm.analysis_generator import AnalysisGenerator
 from llm.answer_generator import AnswerGenerator
+from llm.game_detector import GameDetector
 
 logging.basicConfig(
     level=logging.INFO,
@@ -35,12 +36,14 @@ async def lifespan(app: FastAPI):
     sql_gen = SQLGenerator(llm=llms["sql"], prompt_manager=pm)
     analysis_gen = AnalysisGenerator(llm=llms["analyze"], prompt_manager=pm)
     answer_gen = AnswerGenerator(llm=llms["answer"])
+    game_detector = GameDetector(llm=llms["analyze"])
 
     app.state.llms = llms
     app.state.pm = pm
     app.state.sql_gen = sql_gen
     app.state.analysis_gen = analysis_gen
     app.state.answer_gen = answer_gen
+    app.state.game_detector = game_detector
 
     yield
     logger.info("서버를 종료합니다.")

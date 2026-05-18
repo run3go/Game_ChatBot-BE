@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Body, Depends, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -29,6 +29,8 @@ def get_call_count(
     user_id: str = Query(...),
     db: Session = Depends(get_db),
 ):
+    if not user_id:
+        raise HTTPException(status_code=400, detail="user_id is required")
     row = db.execute(
         text("SELECT remaining_call_count FROM public.user_info_tb WHERE user_id = :user_id"),
         {"user_id": user_id},
@@ -41,6 +43,8 @@ def get_recent_nickname(
     user_id: str = Query(...),
     db: Session = Depends(get_db),
 ):
+    if not user_id:
+        raise HTTPException(status_code=400, detail="user_id is required")
     row = db.execute(
         text("""
             SELECT cm.nicknames[1] AS nickname
