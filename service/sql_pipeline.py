@@ -79,6 +79,11 @@ class SQLPipeline:
                 return ["해당 정보가 데이터베이스에 없어요."], sql
             return ["조건에 맞는 데이터가 없어요."], sql
 
+        if analysis.category == "META_COMPS" and game_type == "TFT":
+            required = {"tier", "comp_name", "avg_place", "pick_rate", "win_rate", "top4_rate", "traits", "champs_items", "tags"}
+            data = [{**{k: None for k in required}, **dict(r)} for r in result]
+            return {"ui_type": "TFT_META_COMP", "data": data}, sql
+
         if analysis.category in {"MARKET", "AUCTION"} and analysis.response_format == "LIST":
             return {"ui_type": analysis.category, "data": [dict(r) for r in result]}, sql
 

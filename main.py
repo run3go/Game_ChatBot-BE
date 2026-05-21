@@ -8,7 +8,7 @@ from llm.factory import create_llm_instances
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import airflow, ask, monitor, sessions, users
+from routers import airflow, ask, monitor, sessions, tft, users
 from service.prompt_manager import PromptManager
 from llm.sql_generator import SQLGenerator
 from llm.analysis_generator import AnalysisGenerator
@@ -62,3 +62,4 @@ app.include_router(sessions.router)
 app.include_router(ask.router)
 app.include_router(airflow.router)
 app.include_router(monitor.router)
+app.include_router(tft.router)

@@ -14,6 +14,10 @@ rules: |
     - champs_items: "기물명(아이템1, 아이템2), ..." 형식의 문자열
     - tags: 덱 플레이 스타일 태그 (예: '7레벨', '리롤', '빠른 8강')
 
+  - [SELECT 필수 컬럼]
+    - META_COMPS 조회 시 SELECT에 반드시 포함: tier, comp_name, avg_place, pick_rate, win_rate, top4_rate, traits, champs_items, tags
+    - 절대 일부 컬럼만 선택하지 말 것. UI 렌더링에 모든 컬럼이 필요함.
+
   - [최신 패치 필수 패턴]
     WITH latest_patch AS (
         SELECT MAX(patch_version) AS current_patch
