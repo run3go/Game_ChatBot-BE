@@ -2,6 +2,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from llm.factory import create_llm_instances
@@ -27,7 +28,9 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     from utils.reranker import CROSS_ENCODER
 
-    CROSS_ENCODER._get_model()
+    # 백그라운드에서 모델 로딩 — health check를 블로킹하지 않음
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(None, CROSS_ENCODER._get_model)
 
     llms = create_llm_instances()
 

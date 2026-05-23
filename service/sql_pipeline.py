@@ -87,7 +87,9 @@ class SQLPipeline:
         if analysis.category in {"MARKET", "AUCTION"} and analysis.response_format == "LIST":
             return {"ui_type": analysis.category, "data": [dict(r) for r in result]}, sql
 
-        return self.answer_generator.answer(question, result, history, category=analysis.category, game_type=game_type), sql
+        if game_type == "TFT":
+            return self.answer_generator.answer_tft(question, result, history), sql
+        return self.answer_generator.answer_lostark(question, result, history, category=analysis.category), sql
 
     def _build_priority_tables(self, analysis: QuestionAnalysis, lookup_entries: list[dict] | None, game_type: str = "LOSTARK") -> list:
         seen: set = set()

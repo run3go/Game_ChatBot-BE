@@ -58,32 +58,39 @@ def _resolve_trait(eng: str, trait_map: dict[str, str]) -> str:
 @router.get("/tft/assets")
 def get_tft_assets(db: Session = Depends(get_db)):
     item_rows = db.execute(text(
-        "SELECT kor_name, image_url, description FROM tft.item_meta_tb WHERE image_url IS NOT NULL"
+        "SELECT kor_name, image_url, description, item_name FROM tft.item_meta_tb WHERE image_url IS NOT NULL"
     )).mappings().all()
 
     unit_rows = db.execute(text("""
         SELECT DISTINCT ON (kor_name)
-            kor_name, image_url, skill, traits
+            kor_name, unit_name, image_url, skill, traits, cost
         FROM tft.unit_meta_tb
         WHERE image_url IS NOT NULL AND kor_name IS NOT NULL
-        ORDER BY kor_name, season DESC, fetched_at DESC
+        ORDER BY kor_name, fetched_at DESC
     """)).mappings().all()
 
     trait_map = _build_trait_map(db)
 
     items = {}
+    item_eng_map: dict[str, str] = {}
     for r in item_rows:
         items[r["kor_name"]] = {
             "imageUrl": r["image_url"],
             "description": _clean_desc(r["description"]) if r["description"] else "",
         }
+        if r.get("item_name"):
+            item_eng_map[r["item_name"]] = r["kor_name"]
 
     champions = {}
+    char_id_map: dict[str, str] = {}
     for r in unit_rows:
         raw_traits = _parse_pg_array(r["traits"])
+        cost_arr = _parse_pg_array(r["cost"])
+        cost = int(cost_arr[0]) if cost_arr else None
         entry: dict = {
             "imageUrl": r["image_url"],
             "traits": [_resolve_trait(t, trait_map) for t in raw_traits],
+            "cost": cost,
         }
         if r["skill"]:
             try:
@@ -94,6 +101,9 @@ def get_tft_assets(db: Session = Depends(get_db)):
             except Exception:
                 pass
         champions[r["kor_name"]] = entry
+        if r.get("unit_name"):
+            stripped = re.sub(r'^TFT\d+_', '', r["unit_name"], flags=re.IGNORECASE).lower()
+            char_id_map[stripped] = r["kor_name"]
 
     trait_desc_rows = db.execute(text(
         "SELECT kor_name, description, stats FROM tft.trait_meta_tb WHERE kor_name IS NOT NULL"
@@ -116,4 +126,10 @@ def get_tft_assets(db: Session = Depends(get_db)):
             "stats": cleaned_stats,
         }
 
-    return {"items": items, "champions": champions, "traits": traits}
+    return {
+        "items": items,
+        "champions": champions,
+        "traits": traits,
+        "charIdMap": char_id_map,
+        "itemEngMap": item_eng_map,
+    }

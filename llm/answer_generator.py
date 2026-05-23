@@ -93,62 +93,36 @@ class AnswerGenerator:
             "game_knowledge": get_game_knowledge(game_type),
         }, "answer_general", detail)
 
-    def answer_display(self, question: str, ui_type: str, data: dict, history: list[dict] | None = None):
-        prompt = ChatPromptTemplate.from_template("""
-            너는 게임 AI 비서야.
-            아래 데이터는 이미 UI로 화면에 표시됐어.
-            UI 내용을 그대로 나열하지 말고, 핵심 포인트나 주목할 점을 간결하게 코멘트해줘.
-            답변은 마크다운 형식으로 작성해.
-            이전 대화 맥락을 반드시 참고해서 답해.
-
-            [UI 타입]
-            {ui_type}
-
-            [이전 대화]
-            {history}
-
-            [질문]
-            {question}
-
-            [데이터(JSON)]
-            {data}
-        """)
-        data_json = json.dumps(data, ensure_ascii=False, default=_json_default)
-        detail = {
-            "input": {"data_size": len(data_json)},
-            "method": "answer_display",
-        }
-        yield from self._stream_with_monitor(self._chain(prompt), {
-            "question": question,
-            "ui_type": ui_type,
-            "data": data_json,
-            "history": self._history(history),
-        }, "answer_display", detail)
-
-    def answer_tft(self, question: str, data: dict, history: list[dict] | None = None):
+    def answer_tft_api(self, question: str, data: dict, history: list[dict] | None = None):
         prompt = ChatPromptTemplate.from_template("""
             너는 롤토체스(TFT) AI 비서야.
-            아래 소환사의 최근 전적 데이터를 바탕으로 자연스럽게 분석해줘.
-            답변은 간결하고 명확하게 마크다운 형식으로 작성해.
+            아래 소환사의 최근 전적 데이터를 바탕으로 분석해줘.
             이전 대화 맥락을 참고해서 답해.
 
             [게임 은어/약어]
             {game_knowledge}
 
-            [데이터 필드 설명]
-            - placement: 순위 (1위가 최고, 1~4위=승리, 5~8위=패배)
-            - level: 최종 레벨
-            - augments: 선택한 증강체 목록
-            - traits: 활성화된 특성 목록 (style: 1=브론즈, 2=실버, 3=골드, 4=프리즘)
-            - units: 최종 유닛 목록 (tier: 별 개수)
-            - total_damage_to_players: 플레이어에게 가한 총 피해량
-            - last_round: 마지막 라운드
-
-            [판단 지침]
-            - 전적이 여러 게임이면 승률, 평균 순위, 자주 쓴 덱/특성 위주로 요약해.
-            - 구체적인 증강체/특성/유닛 이름은 그대로 표시해.
-            - 데이터가 비어있으면 "최근 전적이 없습니다"라고 안내해.
+            [출력 규칙 - 반드시 준수]
+            - 게임별 상세 내용(각 게임의 순위, 레벨, 특성, 유닛 나열)은 절대 출력하지 마.
+              이 정보는 UI에서 이미 보여주므로 중복 출력 금지.
+            - 아래 두 섹션만 출력해. 각 섹션 사이에 빈 줄을 반드시 넣어.
             - 응답을 코드블록(```)으로 감싸지 마. 마크다운을 직접 출력.
+
+            ## 전적 요약
+            아래 항목을 불렛 리스트로 한 줄씩 출력해:
+            - 🎮 총 게임 수: N게임
+            - 🏆 승률 (1~4위): N/N (N%)
+            - 📊 평균 순위: N.N위
+
+            ## 분석
+            전체 게임을 종합해서 아래 항목을 각각 불렛 한 줄로 작성해:
+            - **특성 경향**: 자주 활성화된 특성 조합 패턴
+            - **주력 유닛**: 자주 등장한 유닛과 별 수
+            - **피해량**: 순위별 피해량 패턴 또는 특이점
+
+            항목별로 줄바꿈을 반드시 하고, 문장은 간결하게 핵심만 담아.
+
+            - 데이터가 비어있으면 "최근 전적이 없습니다"라고만 안내해.
 
             [이전 대화]
             {history}
@@ -162,6 +136,45 @@ class AnswerGenerator:
         data_json = json.dumps(data, ensure_ascii=False, default=_json_default)
         detail = {
             "input": {"data_size": len(data_json)},
+            "method": "answer_tft_api",
+        }
+        yield from self._stream_with_monitor(self._chain(prompt), {
+            "question": question,
+            "data": data_json,
+            "history": self._history(history),
+            "game_knowledge": get_game_knowledge("TFT"),
+        }, "answer_tft_api", detail)
+
+    def answer_tft(self, question: str, data, history: list[dict] | None = None):
+        data = [dict(row) for row in data]
+        prompt = ChatPromptTemplate.from_template("""
+            너는 롤토체스(TFT) AI 비서야.
+            DB에서 조회한 데이터를 바탕으로 질문에 답해.
+            답변은 간결하고 명확하게 마크다운 형식으로 작성해.
+            이전 대화 맥락을 참고해서 답해.
+
+            [게임 은어/약어]
+            {game_knowledge}
+
+            [판단 지침]
+            - 제공된 데이터는 이미 DB에서 조회된 최종 결과야. 추가 필터링 없이 전부 포함해.
+            - 데이터가 빈 배열이면 해당 데이터가 없음을 안내해.
+            - 수치 비교는 표로 정리해. 더 좋은 값에 볼드체.
+            - 유닛·특성·아이템 이름은 그대로 표시해.
+            - 응답을 코드블록(```)으로 감싸지 마. 마크다운을 직접 출력.
+
+            [이전 대화]
+            {history}
+
+            [질문]
+            {question}
+
+            [데이터(JSON)]
+            {data}
+        """)
+        data_json = json.dumps(data, ensure_ascii=False, default=_json_default)
+        detail = {
+            "input": {"data_row_count": len(data), "data_size": len(data_json)},
             "method": "answer_tft",
         }
         yield from self._stream_with_monitor(self._chain(prompt), {
@@ -171,7 +184,7 @@ class AnswerGenerator:
             "game_knowledge": get_game_knowledge("TFT"),
         }, "answer_tft", detail)
 
-    def answer(self, question: str, data, history: list[dict] | None = None, category: str = "", game_type: str = "LOSTARK"):
+    def answer_lostark(self, question: str, data, history: list[dict] | None = None, category: str = ""):
         data = [dict(row) for row in data]
         if category in {"MARKET", "AUCTION"}:
             data = _strip_datetime_to_date(data)
@@ -255,11 +268,11 @@ class AnswerGenerator:
                 "data_row_count": len(data),
                 "data_size": len(data_json),
             },
-            "method": "answer",
+            "method": "answer_lostark",
         }
         yield from self._stream_with_monitor(self._chain(prompt), {
             "question": question,
             "data": data_json,
             "history": self._history(history),
-            "game_knowledge": get_game_knowledge(game_type),
-        }, "answer", detail)
+            "game_knowledge": get_game_knowledge("LOSTARK"),
+        }, "answer_lostark", detail)

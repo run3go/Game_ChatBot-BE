@@ -13,20 +13,23 @@ rules: |
 
   - [아이템 빌드업 패턴 - COMBINE_ITEM_AND_SEARCH (3단계)]
 
+    ※ 기본 아이템이 2개든 3개든 동일한 패턴 사용. base_items 자기 자신과 JOIN해서 2개 조합을 모두 시도.
+
     1단계) 기본 아이템 영문명 추출:
     WITH base_items AS (
         SELECT eng_name
         FROM tft.item_meta_tb
-        WHERE kor_name IN ('{기본아이템1}', '{기본아이템2}')
+        WHERE kor_name IN ('{기본아이템1}', '{기본아이템2}', ...)  -- 개수에 맞게 나열
     ),
 
-    2단계) 두 기본 아이템으로 만들 수 있는 완성 아이템 조회:
-    crafted_item AS (
-        SELECT kor_name AS crafted_item_name
-        FROM tft.item_meta_tb
-        WHERE compositions @> ARRAY(SELECT eng_name FROM base_items)::text[]
-          AND array_length(compositions, 1) = 2
-        LIMIT 1
+    2단계) base_items에서 2개씩 조합해 만들 수 있는 완성 아이템을 모두 조회:
+    crafted_items AS (
+        SELECT DISTINCT it.kor_name AS crafted_item_name
+        FROM tft.item_meta_tb it
+        JOIN base_items b1 ON it.compositions @> ARRAY[b1.eng_name]::text[]
+        JOIN base_items b2 ON it.compositions @> ARRAY[b2.eng_name]::text[]
+                           AND b1.eng_name < b2.eng_name
+        WHERE array_length(it.compositions, 1) = 2
     ),
 
     3단계) 완성 아이템 포함 덱 조회:
@@ -42,9 +45,8 @@ rules: |
         c.win_rate,
         c.avg_place
     FROM tft.metatft_comps c
-    CROSS JOIN crafted_item ci
+    JOIN crafted_items ci ON c.champs_items ILIKE '%' || ci.crafted_item_name || '%'
     JOIN latest_patch lp ON c.patch_version = lp.current_patch
-    WHERE c.champs_items ILIKE '%' || ci.crafted_item_name || '%'
     ORDER BY c.win_rate DESC, c.avg_place ASC
     LIMIT 10
 

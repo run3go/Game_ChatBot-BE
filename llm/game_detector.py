@@ -15,19 +15,20 @@ GAME_NAMES: dict[str, str] = {
 
 GAME_KEYWORDS: dict[str, list[str]] = {
     "LOSTARK": ["로스트아크", "로아", "어비스", "레이드", "각인", "아크패시브", "아크그리드", "보석", "원정대", "경매장", "거래소", "카드", "어빌리티스톤"],
-    "TFT": ["롤토체스", "롤체", "tft", "증강체", "챔피언", "특성", "덱", "포지셔닝", "조합", "증강", "라운드"],
+    "TFT": ["롤토체스", "롤체", "tft", "증강체", "챔피언", "특성", "덱", "포지셔닝", "조합", "증강", "라운드", "시너지"],
 }
 
 
 def quick_detect(question: str) -> "GameType | None":
     """키워드 기반 빠른 감지. LLM 호출 없이 명확한 게임이 감지되면 반환, 불명확하면 None."""
-    # "이름#태그" 형식은 라이엇 계정 → TFT 질문으로 바로 확정
     if _RIOT_ID_RE.search(question):
         return "TFT"
     q = question.lower()
-    for game, keywords in GAME_KEYWORDS.items():
-        if any(kw in q for kw in keywords):
-            return game
+    scores = {game: sum(kw in q for kw in keywords) for game, keywords in GAME_KEYWORDS.items()}
+    best_game, best_score = max(scores.items(), key=lambda x: x[1])
+    second_score = sorted(scores.values())[-2] if len(scores) > 1 else 0
+    if best_score > 0 and best_score > second_score:
+        return best_game
     return None
 
 

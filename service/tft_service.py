@@ -1,6 +1,7 @@
 import re
 import logging
 from datetime import datetime
+from sqlalchemy import text
 from api.riot_api import get_puuid, get_tft_match_ids, get_tft_match
 from service.sql_pipeline import SQLPipeline
 
@@ -97,7 +98,22 @@ class TFTService:
             return
 
         yield "status", "답변을 생성하는 중이에요..."
-        yield "result", self.answer_generator.answer_tft(question, data, history)
+        yield "result", {
+            "ui_type": "TFT_MATCH_HISTORY",
+            "summoner": data["summoner"],
+            "matches": data["matches"],
+        }
+
+        strip = lambda s: re.sub(r'^TFT\d+_', '', s, flags=re.IGNORECASE).lower()
+        umap = {strip(r["unit_name"]): r["kor_name"] for r in self.db.execute(text("SELECT unit_name, kor_name FROM tft.unit_meta_tb WHERE kor_name IS NOT NULL AND unit_name IS NOT NULL")).mappings()}
+        tmap = {strip(r["eng_name"]): r["kor_name"] for r in self.db.execute(text("SELECT eng_name, kor_name FROM tft.trait_meta_tb WHERE kor_name IS NOT NULL AND eng_name IS NOT NULL")).mappings()}
+        amap = {strip(r["item_name"]): r["kor_name"] for r in self.db.execute(text("SELECT item_name, kor_name FROM tft.item_meta_tb WHERE kor_name IS NOT NULL AND item_name IS NOT NULL")).mappings()}
+        for m in data["matches"]:
+            for u in m["units"]: u["name"] = umap.get(strip(u["name"]), u["name"])
+            for t in m["traits"]: t["name"] = tmap.get(strip(t["name"]), t["name"])
+            m["augments"] = [amap.get(strip(a), a) for a in m.get("augments", [])]
+
+        yield "result_text", self.answer_generator.answer_tft_api(question, data, history)
 
     def _handle_sql(self, question, analysis, history, filtered_entries, abbr_hints):
         yield "status", "데이터를 조회하는 중이에요..."
@@ -134,8 +150,7 @@ def _format_participant(p: dict, game_datetime: int) -> dict:
         key=lambda t: -t.get("num_units", 0),
     )[:5]
 
-    # 별 수 내림차순으로 최대 6개
-    units = sorted(p.get("units", []), key=lambda u: -u.get("tier", 0))[:6]
+    units = sorted(p.get("units", []), key=lambda u: -u.get("tier", 0))
 
     return {
         "placement": p.get("placement"),

@@ -2,9 +2,10 @@ category_name: "AUGMENT_COMPS"
 
 rules: |
   - 사용 테이블:
-    - `tft.metatft_pro_comps_augments` : 증강체별 추천 덱 (patch_version, comp_name, augment_name, recommended_tier)
+    - `tft.metatft_pro_comps_augments` : 증강체별 추천 덱 (patch_version, matched_comp_name, augment_name, recommended_tier)
 
   - [컬럼 의미]
+    - matched_comp_name: 덱(조합) 이름
     - augment_name: 증강체명 (예: '보석 연꽃 I', '보석 연꽃 II', '보석 연꽃 III')
     - recommended_tier: 해당 증강체를 이 덱에서 사용할 때의 추천 등급 ('S', 'A', 'B', 'C', 'D')
 
@@ -17,11 +18,11 @@ rules: |
     ),
     ranked_comps AS (
         SELECT
-            c.comp_name,
+            c.matched_comp_name,
             c.augment_name,
             c.recommended_tier,
             ROW_NUMBER() OVER(
-                PARTITION BY c.comp_name
+                PARTITION BY c.matched_comp_name
                 ORDER BY
                     CASE c.recommended_tier
                         WHEN 'S' THEN 1 WHEN 'A' THEN 2 WHEN 'B' THEN 3
@@ -32,7 +33,7 @@ rules: |
         JOIN latest_patch lp ON c.patch_version = lp.current_patch
         WHERE c.augment_name ILIKE '%{증강체명}%'
     )
-    SELECT comp_name, augment_name, recommended_tier
+    SELECT matched_comp_name, augment_name, recommended_tier
     FROM ranked_comps
     WHERE rn = 1
     ORDER BY
