@@ -97,6 +97,8 @@ class TFTService:
             yield "result", [data["error"]]
             return
 
+        yield "nicknames", [summoner_name]
+
         yield "status", "답변을 생성하는 중이에요..."
         yield "result", {
             "ui_type": "TFT_MATCH_HISTORY",

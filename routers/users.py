@@ -51,6 +51,7 @@ def get_recent_nickname(
             FROM public.chat_messages_tb cm
             JOIN public.chat_sessions_tb cs ON cm.chat_id = cs.chat_id
             WHERE cs.user_id = :user_id
+              AND cs.game_type != 'TFT'
               AND cm.nicknames IS NOT NULL
               AND array_length(cm.nicknames, 1) > 0
             ORDER BY cm.created_at DESC
@@ -59,3 +60,27 @@ def get_recent_nickname(
         {"user_id": user_id},
     ).first()
     return {"nickname": row[0] if row else None}
+
+
+@router.get("/users/recent-summoner")
+def get_recent_summoner(
+    user_id: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    if not user_id:
+        raise HTTPException(status_code=400, detail="user_id is required")
+    row = db.execute(
+        text("""
+            SELECT cm.nicknames[1] AS summoner
+            FROM public.chat_messages_tb cm
+            JOIN public.chat_sessions_tb cs ON cm.chat_id = cs.chat_id
+            WHERE cs.user_id = :user_id
+              AND cs.game_type = 'TFT'
+              AND cm.nicknames IS NOT NULL
+              AND array_length(cm.nicknames, 1) > 0
+            ORDER BY cm.created_at DESC
+            LIMIT 1
+        """),
+        {"user_id": user_id},
+    ).first()
+    return {"summoner": row[0] if row else None}
