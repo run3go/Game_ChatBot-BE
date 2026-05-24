@@ -22,8 +22,10 @@ category_rules: |
     예) "카이사 추천템" → UNIT_ITEM_RECOMMENDATION
 
   - COMPARE_PERFORMANCE: 두 기물 또는 두 아이템의 성능·승률 비교.
-    트리거: {비교, 누가 더, 어느게 더, A vs B, 승률 비교}
+    트리거: {비교, 누가 더, 어느게 더, A vs B, 승률 비교, 누구한테 주는게, 누구에게 주는게, 누구 주는 게, 중에 누구}
     예) "구인수는 자야랑 르블랑 중 누구 주는 게 승률 좋아?" → COMPARE_PERFORMANCE
+    예) "무대는 진과 카이사 중에 누구한테 주는게 더 좋아?" → COMPARE_PERFORMANCE
+    ※ "A와 B 중에 누구한테/어느쪽에 [아이템/무언가] 주는게" 패턴은 무조건 COMPARE_PERFORMANCE.
 
   - AUGMENT_COMPS: 특정 증강체를 선택했을 때 추천 덱 조회.
     트리거: {증강체, 증강 골랐는데, 증강 있을 때, 증강체 덱}

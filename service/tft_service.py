@@ -7,7 +7,7 @@ from service.sql_pipeline import SQLPipeline
 
 logger = logging.getLogger(__name__)
 
-_API_CATEGORIES = {"USER_MATCH_HISTORY", "COMPARE_PERFORMANCE"}
+_API_CATEGORIES = {"USER_MATCH_HISTORY"}
 
 # 태그라인 패턴 — 이름은 공백 포함 가능하므로 역방향으로 추출
 _TAG_RE = re.compile(r"#([A-Za-z0-9]+)")

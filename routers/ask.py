@@ -159,6 +159,7 @@ async def ask_ai_stream(
             logger.exception("결과 직렬화 오류 (chat_id=%s)", chat_id)
             yield f"data: {json.dumps({'type': 'error', 'content': '잠시 후 다시 시도해 주세요.'})}\n\n"
         finally:
+            yield "data: [DONE]\n\n"
             if is_first_message and chat_id and user_id:
                 try:
                     title = ChatService.generate_title(question, request.app.state.llms["answer"])
@@ -166,7 +167,6 @@ async def ask_ai_stream(
                     yield f"data: {json.dumps({'type': 'title', 'content': title})}\n\n"
                 except Exception:
                     pass
-            yield "data: [DONE]\n\n"
 
     if chat_id and user_id:
         background_tasks.add_task(

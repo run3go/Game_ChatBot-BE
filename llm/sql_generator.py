@@ -138,10 +138,7 @@ class SQLGenerator:
 
             cleaned_sql = self._clean_sql(result.sql)
 
-            detail["output"] = {
-                "sql": cleaned_sql,
-                "ui_type": result.ui_type,
-            }
+            detail["output"] = {"sql": cleaned_sql}
 
             log_llm_call(
                 generator_type="sql",
@@ -151,7 +148,7 @@ class SQLGenerator:
                 detail=detail,
             )
 
-            return cleaned_sql, result.ui_type
+            return cleaned_sql
 
         except Exception as e:
             log_llm_call(
@@ -171,13 +168,13 @@ class SQLGenerator:
         def _check_invalid(sql: str) -> set:
             return {re.sub(r'\W', '', w.split(".")[-1]) for w in sql.split() if "lostark." in w} - allowed
 
-        sql, _ = self.generate(question, analysis, schema, nicknames, few_shots=few_shots, abbr_hints=abbr_hints, auction_conditions=auction_conditions, history=history, game_type=game_type)
+        sql = self.generate(question, analysis, schema, nicknames, few_shots=few_shots, abbr_hints=abbr_hints, auction_conditions=auction_conditions, history=history, game_type=game_type)
         invalid = _check_invalid(sql)
         if not invalid:
             return sql
 
-        sql, _ = self.generate(question, analysis, schema, nicknames, few_shots=few_shots, abbr_hints=abbr_hints, auction_conditions=auction_conditions, history=history, game_type=game_type,
-                               error=f"허용되지 않은 테이블 사용: {invalid}. 반드시 [스키마]에 있는 테이블만 사용해.")
+        sql = self.generate(question, analysis, schema, nicknames, few_shots=few_shots, abbr_hints=abbr_hints, auction_conditions=auction_conditions, history=history, game_type=game_type,
+                            error=f"허용되지 않은 테이블 사용: {invalid}. 반드시 [스키마]에 있는 테이블만 사용해.")
         invalid = _check_invalid(sql)
         if invalid:
             raise ValueError(f"LLM이 허용되지 않은 테이블을 사용했습니다: {invalid}")

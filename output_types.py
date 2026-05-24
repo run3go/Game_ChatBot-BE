@@ -36,4 +36,3 @@ QuestionAnalysis = LOSTARKAnalysis | TFTAnalysis
 
 class SQLWithUIType(BaseModel):
   sql: str = Field(description="생성된 SQL 쿼리 (SQL만, 설명 없이)")
-  ui_type: Literal["TEXT", "SKILL", "ENGRAVING", "AVATAR", "ARK_GRID", "ARK_PASSIVE", "COLLECTIBLE", "PROFILE", "TOTAL_INFO", "MARKET", "AUCTION"] = Field(description="카테고리 전체 조회면 해당 타입, 필터링·집계·수치 데이터면 TEXT")

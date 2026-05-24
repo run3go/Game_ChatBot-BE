@@ -22,7 +22,12 @@ rules: |
         c.win_rate,
         c.avg_place,
         c.top4_rate,
-        c.champs_items
+        CASE
+            WHEN c.champs_items ~ '{기물A}\s*\([^)]*{아이템}[^)]*\)'
+                THEN SUBSTRING(c.champs_items FROM '{기물A}\s*\(([^)]+)\)')
+            WHEN c.champs_items ~ '{기물B}\s*\([^)]*{아이템}[^)]*\)'
+                THEN SUBSTRING(c.champs_items FROM '{기물B}\s*\(([^)]+)\)')
+        END AS unit_items
     FROM tft.metatft_comps c
     JOIN latest_patch lp ON c.patch_version = lp.current_patch
     WHERE c.champs_items ~ '{기물A}\s*\([^)]*{아이템}[^)]*\)'

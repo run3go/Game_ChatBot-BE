@@ -127,7 +127,7 @@ class SQLPipeline:
                 self.db.rollback()
                 if attempt == 1:
                     return None
-                sql, _ = self.sql_generator.generate(
+                sql = self.sql_generator.generate(
                     question, analysis, schema, nicknames,
                     error=f"SQL 실행 오류: {str(e.orig)}",
                     few_shots=few_shots,

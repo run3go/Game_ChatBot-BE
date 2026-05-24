@@ -103,6 +103,7 @@ _TFT_KNOWLEDGE = """
 - units: 최종 유닛 목록 (tier: 별 개수)
 - total_damage_to_players: 플레이어에게 가한 총 피해량
 - last_round: 마지막 라운드
+- equipped_unit: 장착 유닛
 
 [시너지 영→한]
 admin=중재자, primordian=태고족, aptrait=복제자, psyops=초능력, drx=N.O.V.A., fateweaver=운명술사,
