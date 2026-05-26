@@ -4,6 +4,8 @@ sql_basics: |
   - 동점자 포함 상위 N개 추출 시: ORDER BY ... DESC FROM FIRST 1 ROWS WITH TIES 사용한다.
   - 교집합 없는 데이터 추출 시: NOT EXISTS 사용.
   - 여러 통계와 리스트 동시 추출 시: JOIN 대신 상호관련 서브쿼리 사용 권장.
+  - [LIMIT 필수] 모든 SELECT에는 LIMIT을 명시하라. 포맷별 기준은 [FORMAT] 섹션 참고.
+    단, COUNT(*) 또는 집계 함수만 반환하는 쿼리(단일 행)는 LIMIT 생략 가능.
 
 dynamic_table_rules: |
   - [단일 최신화] collected_at 존재 테이블 조회 시, WITH step00 AS (SELECT MAX(collected_at) ... WHERE character_name = '...') 패턴 필수.

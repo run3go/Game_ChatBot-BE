@@ -1,14 +1,19 @@
 response_format_rules:
-  COUNT: "WITH step00 패턴으로 최신 시점 확보 후 COUNT(*) 단일 값 반환."
-  COUNT_LIST: "GROUP BY + COUNT(*). 전체 유저 통계 시 최신 시점 조인 필수."
-  VALUE: "SUM, AVG 등 단일 집계 수치만 반환. 행 전체 반환 금지."
+  COUNT: "WITH step00 패턴으로 최신 시점 확보 후 COUNT(*) 단일 값 반환. LIMIT 불필요."
+  COUNT_LIST: "GROUP BY + COUNT(*). 전체 유저 통계 시 최신 시점 조인 필수. LIMIT 30."
+  VALUE: "SUM, AVG 등 단일 집계 수치만 반환. 행 전체 반환 금지. LIMIT 불필요."
   TEXT_LIST: |
-    - 조건에 맞는 행 전체 반환. 
+    - 조건에 맞는 행 전체 반환.
     - "가장 ~한 것" 질문 시 FETCH FIRST 1 ROWS WITH TIES 사용.
+    - 그 외 리스트 반환 시 LIMIT 20.
+  LIST: "아이템·시세 목록 반환. UI에서 페이지네이션으로 처리하므로 LIMIT 불필요."
+  DISPLAY: "단일 캐릭터 상세 정보 반환. LIMIT 1."
   COMPARE_CHAR: |
     - 캐릭터별로 독립적인 CTE(latest_캐릭터명) 구성.
     - json_build_object로 명시적 컬럼 구성 (to_jsonb 사용 금지).
-  COMPARE_TIME: "LAG() 윈도우 함수 사용. 이전값(prev_*)과 현재값(current_*) 컬럼 명명."
+    - LIMIT 10.
+  COMPARE_TIME: "LAG() 윈도우 함수 사용. 이전값(prev_*)과 현재값(current_*) 컬럼 명명. LIMIT 30."
   COMPARE_HONING: |
-    - LAG(honing_level)로 강화 시점 탐지. 
+    - LAG(honing_level)로 강화 시점 탐지.
     - ⚠️ MAX(collected_at) 사용 금지. 전체 이력을 가져와야 LAG 비교 가능.
+    - LIMIT 50.
