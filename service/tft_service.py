@@ -1,8 +1,9 @@
 import re
 import logging
-from datetime import datetime
+import threading
+from datetime import datetime, timezone
 from sqlalchemy import text
-from api.riot_api import get_puuid, get_tft_match_ids, get_tft_match
+from api.riot_api import get_puuid, get_tft_match_ids, get_tft_match, get_league_by_puuid
 from service.sql_pipeline import SQLPipeline
 
 logger = logging.getLogger(__name__)
@@ -56,7 +57,63 @@ def fetch_match_history(summoner_name: str, count: int = 10) -> dict:
             game_datetime = raw.get("info", {}).get("game_datetime", 0)
             matches.append(_format_participant(participant, game_datetime))
 
-    return {"summoner": summoner_name, "matches": matches}
+    return {"summoner": summoner_name, "puuid": puuid, "matches": matches}
+
+
+def _save_account_and_league_bg(puuid: str, game_name: str, tag_line: str) -> None:
+    """전적 조회 후 백그라운드에서 tft_acc_tb + normal_user_info_tb에 저장."""
+    from database import SessionLocal
+    db = SessionLocal()
+    try:
+        db.execute(text("""
+            INSERT INTO tft.tft_acc_tb (puuid, user_name, tag_line)
+            VALUES (:puuid, :user_name, :tag_line)
+            ON CONFLICT (puuid) DO UPDATE
+                SET user_name  = EXCLUDED.user_name,
+                    tag_line   = EXCLUDED.tag_line,
+                    updated_at = NOW()
+        """), {"puuid": puuid, "user_name": game_name, "tag_line": tag_line})
+
+        entries = get_league_by_puuid(puuid)
+        if entries:
+            snapshot_at = datetime.now(timezone.utc)
+            for e in entries:
+                if not e.get("queueType"):
+                    continue
+                db.execute(text("""
+                    INSERT INTO tft.normal_user_info_tb (
+                        snapshot_at, puuid, queue_type, region,
+                        league_id, tier, rank,
+                        league_points, wins, losses,
+                        veteran, inactive, fresh_blood, hot_streak
+                    ) VALUES (
+                        :snapshot_at, :puuid, :queue_type, 'KR',
+                        :league_id, :tier, :rank,
+                        :league_points, :wins, :losses,
+                        :veteran, :inactive, :fresh_blood, :hot_streak
+                    )
+                    ON CONFLICT (snapshot_at, puuid, queue_type) DO NOTHING
+                """), {
+                    "snapshot_at":    snapshot_at,
+                    "puuid":          puuid,
+                    "queue_type":     e.get("queueType"),
+                    "league_id":      e.get("leagueId"),
+                    "tier":           e.get("tier"),
+                    "rank":           e.get("rank"),
+                    "league_points":  e.get("leaguePoints", 0),
+                    "wins":           e.get("wins", 0),
+                    "losses":         e.get("losses", 0),
+                    "veteran":        e.get("veteran"),
+                    "inactive":       e.get("inactive"),
+                    "fresh_blood":    e.get("freshBlood"),
+                    "hot_streak":     e.get("hotStreak"),
+                })
+        db.commit()
+    except Exception:
+        logger.exception("계정/리그 스냅샷 저장 실패 (puuid=%s)", puuid)
+        db.rollback()
+    finally:
+        db.close()
 
 
 class TFTService:
@@ -116,6 +173,14 @@ class TFTService:
             m["augments"] = [amap.get(strip(a), a) for a in m.get("augments", [])]
 
         yield "result_text", self.answer_generator.answer_tft_api(question, data, history)
+
+        if "puuid" in data:
+            game_name, tag_line = summoner_name.split("#", 1)
+            threading.Thread(
+                target=_save_account_and_league_bg,
+                args=(data["puuid"], game_name, tag_line),
+                daemon=True,
+            ).start()
 
     def _handle_sql(self, question, analysis, history, filtered_entries, abbr_hints):
         yield "status", "데이터를 조회하는 중이에요..."

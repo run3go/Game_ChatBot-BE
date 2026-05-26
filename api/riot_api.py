@@ -7,6 +7,7 @@ logger = logging.getLogger(__name__)
 
 _ACCOUNT_BASE = "https://asia.api.riotgames.com"
 _TFT_BASE = "https://asia.api.riotgames.com"
+_PLATFORM_BASE = "https://kr.api.riotgames.com"
 
 
 def _headers() -> dict:
@@ -51,6 +52,22 @@ def get_tft_match_ids(puuid: str, count: int = 10) -> list[str]:
         return []
     except Exception:
         logger.exception("TFT Match IDs API 통신 오류")
+        return []
+
+
+def get_league_by_puuid(puuid: str) -> list[dict]:
+    """puuid로 TFT 리그 엔트리 목록 조회 (queue_type별 tier/LP/wins/losses 등)."""
+    url = f"{_PLATFORM_BASE}/tft/league/v1/by-puuid/{urllib.parse.quote(puuid)}"
+    try:
+        with httpx.Client(timeout=10) as client:
+            r = client.get(url, headers=_headers())
+        if r.status_code == 200:
+            data = r.json()
+            return data if isinstance(data, list) else [data]
+        logger.error("TFT League by-puuid API 실패 (%s): %s", r.status_code, puuid)
+        return []
+    except Exception:
+        logger.exception("TFT League by-puuid API 통신 오류: %s", puuid)
         return []
 
 
