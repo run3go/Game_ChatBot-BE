@@ -105,19 +105,6 @@ _TFT_KNOWLEDGE = """
 - last_round: 마지막 라운드
 - equipped_unit: 장착 유닛
 
-[시너지 영→한]
-admin=중재자, primordian=태고족, aptrait=복제자, psyops=초능력, drx=N.O.V.A., fateweaver=운명술사,
-rangedtrait=저격수, timebreaker=시간 균열자, resisttank=요새, shieldtank=선봉대, hptank=싸움꾼,
-meleetrait=습격자, mecha=메카, summontrait=길잡이, astrait=도전자, manatrait=전달자,
-assassintrait=불한당, anima=동물특공대, animasquad=동물특공대, darkstar=암흑의 별,
-astronaut=정령족, spacegroove=우주 그루브, flextrait=여행자, stargazer=별돌보미,
-stargazer_serpent=별돌보미 - 뱀, stargazer_mountain=별돌보미 - 산,
-stargazer_fountain=별돌보미 - 우물, stargazer_huntress=별돌보미 - 여사냥꾼,
-stargazer_altar=별돌보미 - 제단, stargazer_boar=별돌보미 - 멧돼지, stargazer_medallion=별돌보미 - 메달,
-shenuniquetrait=보루, tahmkenchuniquetrait=지휘관, sonauniquetrait=지휘관,
-morganauniquetrait=어둠의 여인, fiorauniquetrait=신성 결투가, vexuniquetrait=파멸자,
-jhinuniquetrait=말살자, gravesuniquetrait=최신상, zeduniquetrait=은하계 사냥꾼,
-misfortuneuniquetrait=기동총격여신, rhaastuniquetrait=구원자, blitzcrankuniquetrait=파티광
 """.strip()
 
 _KNOWLEDGE_MAP: dict[str, str] = {

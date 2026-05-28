@@ -66,7 +66,9 @@ def get_tft_assets(db: Session = Depends(get_db)):
             kor_name, unit_name, image_url, skill, traits, cost
         FROM tft.unit_meta_tb
         WHERE image_url IS NOT NULL AND kor_name IS NOT NULL
-        ORDER BY kor_name, fetched_at DESC
+        ORDER BY kor_name,
+            (REGEXP_MATCH(unit_name, '(TFT|Set)(\\d+)', 'i'))[2]::int DESC NULLS LAST,
+            fetched_at DESC
     """)).mappings().all()
 
     trait_map = _build_trait_map(db)

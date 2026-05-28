@@ -1,10 +1,29 @@
 import re
 import logging
 import threading
+from collections import Counter
 from datetime import datetime, timezone
 from sqlalchemy import text
 from api.riot_api import get_puuid, get_tft_match_ids, get_tft_match, get_league_by_puuid
 from service.sql_pipeline import SQLPipeline
+
+# DB에 없는 특성명의 영→한 폴백 (game_knowledge.py의 [시너지 영→한]과 동기화 유지)
+_TRAIT_KO: dict[str, str] = {
+    "admin": "중재자", "primordian": "태고족", "aptrait": "복제자",
+    "psyops": "초능력", "drx": "N.O.V.A.", "fateweaver": "운명술사",
+    "rangedtrait": "저격수", "timebreaker": "시간 균열자", "resisttank": "요새",
+    "shieldtank": "선봉대", "hptank": "싸움꾼", "meleetrait": "습격자",
+    "mecha": "메카", "summontrait": "길잡이", "astrait": "도전자",
+    "manatrait": "전달자", "assassintrait": "불한당", "anima": "동물특공대",
+    "animasquad": "동물특공대", "darkstar": "암흑의 별", "astronaut": "정령족",
+    "spacegroove": "우주 그루브", "flextrait": "여행자", "stargazer": "별돌보미",
+    "shenuniquetrait": "보루", "tahmkenchuniquetrait": "지휘관",
+    "sonauniquetrait": "지휘관", "morganauniquetrait": "어둠의 여인",
+    "fiorauniquetrait": "신성 결투가", "vexuniquetrait": "파멸자",
+    "jhinuniquetrait": "말살자", "gravesuniquetrait": "최신상",
+    "zeduniquetrait": "은하계 사냥꾼", "misfortuneuniquetrait": "기동총격여신",
+    "rhaastuniquetrait": "구원자", "blitzcrankuniquetrait": "파티광",
+}
 
 logger = logging.getLogger(__name__)
 
@@ -60,8 +79,9 @@ def fetch_match_history(summoner_name: str, count: int = 10) -> dict:
     return {"summoner": summoner_name, "puuid": puuid, "matches": matches}
 
 
-def _save_account_and_league_bg(puuid: str, game_name: str, tag_line: str) -> None:
-    """전적 조회 후 백그라운드에서 tft_acc_tb + normal_user_info_tb에 저장."""
+def _save_account_and_league_bg(puuid: str, game_name: str, tag_line: str, league_entries: list[dict] | None = None) -> None:
+    """전적 조회 후 백그라운드에서 tft_acc_tb + normal_user_info_tb에 저장.
+    league_entries를 넘기면 API 재호출 없이 해당 데이터를 사용한다."""
     from database import SessionLocal
     db = SessionLocal()
     try:
@@ -74,7 +94,7 @@ def _save_account_and_league_bg(puuid: str, game_name: str, tag_line: str) -> No
                     updated_at = NOW()
         """), {"puuid": puuid, "user_name": game_name, "tag_line": tag_line})
 
-        entries = get_league_by_puuid(puuid)
+        entries = league_entries if league_entries is not None else get_league_by_puuid(puuid)
         if entries:
             snapshot_at = datetime.now(timezone.utc)
             for e in entries:
@@ -156,21 +176,48 @@ class TFTService:
 
         yield "nicknames", [summoner_name]
 
+        league_entries: list[dict] = []
+        ranked_entry: dict | None = None
+        if "puuid" in data:
+            try:
+                league_entries = get_league_by_puuid(data["puuid"])
+                ranked_entry = next((e for e in league_entries if e.get("queueType") == "RANKED_TFT"), None)
+            except Exception:
+                logger.exception("TFT 리그 정보 조회 실패")
+
         yield "status", "답변을 생성하는 중이에요..."
         yield "result", {
             "ui_type": "TFT_MATCH_HISTORY",
             "summoner": data["summoner"],
             "matches": data["matches"],
+            "league": ranked_entry,
         }
 
-        strip = lambda s: re.sub(r'^TFT\d+_', '', s, flags=re.IGNORECASE).lower()
+        strip = lambda s: re.sub(r'^(?:TFT|Set)\d+_?', '', s, flags=re.IGNORECASE).lower()
         umap = {strip(r["unit_name"]): r["kor_name"] for r in self.db.execute(text("SELECT unit_name, kor_name FROM tft.unit_meta_tb WHERE kor_name IS NOT NULL AND unit_name IS NOT NULL")).mappings()}
         tmap = {strip(r["eng_name"]): r["kor_name"] for r in self.db.execute(text("SELECT eng_name, kor_name FROM tft.trait_meta_tb WHERE kor_name IS NOT NULL AND eng_name IS NOT NULL")).mappings()}
         amap = {strip(r["item_name"]): r["kor_name"] for r in self.db.execute(text("SELECT item_name, kor_name FROM tft.item_meta_tb WHERE kor_name IS NOT NULL AND item_name IS NOT NULL")).mappings()}
         for m in data["matches"]:
-            for u in m["units"]: u["name"] = umap.get(strip(u["name"]), u["name"])
-            for t in m["traits"]: t["name"] = tmap.get(strip(t["name"]), t["name"])
+            for u in m["units"]:
+                key = strip(u["name"])
+                u["name"] = umap.get(key, u["name"])
+            for t in m["traits"]:
+                key = strip(t["name"])
+                t["name"] = tmap.get(key) or _TRAIT_KO.get(key) or key
             m["augments"] = [amap.get(strip(a), a) for a in m.get("augments", [])]
+
+        # 아이템 3개 풀착용 유닛을 Python에서 직접 집계 (LLM이 JSON 배열을 직접 세는 것은 불안정)
+        core_counter: Counter = Counter()
+        for m in data["matches"]:
+            for u in m["units"]:
+                if len(u.get("items", [])) == 3:
+                    tier_suffix = f" {u['tier']}성" if u.get("tier", 1) >= 2 else ""
+                    core_counter[f"{u['name']}{tier_suffix}"] += 1
+        data["core_units"] = [
+            {"name": name, "count": cnt}
+            for name, cnt in core_counter.most_common(3)
+            if cnt >= 2
+        ]
 
         yield "result_text", self.answer_generator.answer_tft_api(question, data, history)
 
@@ -178,7 +225,7 @@ class TFTService:
             game_name, tag_line = summoner_name.split("#", 1)
             threading.Thread(
                 target=_save_account_and_league_bg,
-                args=(data["puuid"], game_name, tag_line),
+                args=(data["puuid"], game_name, tag_line, league_entries),
                 daemon=True,
             ).start()
 
