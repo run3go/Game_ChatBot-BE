@@ -47,6 +47,10 @@ async def ask_ai_stream(
     history = None
     is_first_message = False
     reask_message: str | None = None
+    game_type: str | None = None
+    svc: ChatService | None = None
+    _needs_llm_detect = False   # quick_detect 실패 → generate() 안에서 LLM 감지
+    _needs_switch_check = False  # 게임 확정 후 다른 게임 감지 → generate() 안에서 확인
 
     if chat_id and user_id:
         svc = ChatService(db)
@@ -57,7 +61,6 @@ async def ask_ai_stream(
         summary = svc.get_summary(chat_id)
         history = ([{"role": "summary", "content": summary}] if summary else []) + recent
 
-        game_detector: GameDetector = request.app.state.game_detector
         game_type = svc.get_game_type(chat_id)
 
         if history and is_game_switch_reask(history):
@@ -69,18 +72,18 @@ async def ask_ai_stream(
                     game_type = new_game
         else:
             if game_type is None:
-                # 첫 질문 — 키워드/패턴으로 먼저 시도, 불명확하면 LLM으로 확정
-                detected = quick_detect(question) or game_detector.detect(question)
-                if detected != "UNKNOWN":
-                    svc.update_game_type(chat_id, detected)
-                    game_type = detected
+                # 키워드로 즉시 확정되면 바로 처리, 불명확하면 generate() 안에서 LLM 감지
+                quick = quick_detect(question)
+                if quick is not None:
+                    svc.update_game_type(chat_id, quick)
+                    game_type = quick
+                else:
+                    _needs_llm_detect = True
             else:
-                # 게임 이미 확정 — 키워드 체크 후 다른 게임일 때만 LLM 호출
+                # 게임 이미 확정 — 키워드 체크 후 다른 게임일 때만 generate() 안에서 LLM 확인
                 quick = quick_detect(question)
                 if quick is not None and quick != game_type:
-                    detected = game_detector.detect(question)
-                    if detected != "UNKNOWN" and detected != game_type:
-                        reask_message = f"혹시 {GAME_NAMES[detected]} 관련 질문인가요?"
+                    _needs_switch_check = True
 
     if user_id:
         row = db.execute(
@@ -104,8 +107,26 @@ async def ask_ai_stream(
     generated_sql: list[str] = []
 
     async def generate():
+        nonlocal game_type, reask_message
         result = None
         result_text = None
+
+        # LLM 게임 감지 (quick_detect 실패 시) — 느리므로 status 먼저 전송
+        if _needs_llm_detect:
+            yield f"data: {json.dumps({'type': 'status', 'content': '게임을 파악하는 중이에요...'})}\n\n"
+            game_detector: GameDetector = request.app.state.game_detector
+            detected = game_detector.detect(question, db=db)
+            if detected != "UNKNOWN":
+                if svc:
+                    svc.update_game_type(chat_id, detected)
+                game_type = detected
+
+        # 게임 전환 확인 (LLM)
+        if _needs_switch_check:
+            game_detector = request.app.state.game_detector
+            detected = game_detector.detect(question, db=db)
+            if detected != "UNKNOWN" and detected != game_type:
+                reask_message = f"혹시 {GAME_NAMES[detected]} 관련 질문인가요?"
 
         # 게임 전환 재질문
         if reask_message:

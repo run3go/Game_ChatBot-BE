@@ -39,6 +39,39 @@ category_rules: |
     트리거: {빌드업, 아이템 있는데, 재료 있는데, 뭐 만들 수 있어, 어울리는 기물}
     예) "곡궁이랑 쓸데없이 큰 지팡이 있는데 어떤 덱" → ITEM_BUILDUP_COMPS
 
+  - UNIT_PERFORMANCE: 실제 매치 데이터 기반 특정 기물의 전반적 성능 조회. 성급(1·2·3성)별 게임 수·평균 등수·승률 집계.
+    트리거: {쓸만해, 요즘 어때, 성능이 어때, 강해, 약해, 픽할만해} + 기물명
+    예) "요즘 브라이어 쓸만해?" → UNIT_PERFORMANCE
+    예) "카이사 요즘 강해?" → UNIT_PERFORMANCE
+    ⚠️ embedding_context에 대상이 [아이템]으로 표시되면 ITEM_PERFORMANCE. [기물]·[유닛]으로 표시되면 UNIT_PERFORMANCE.
+    ⚠️ "어떤 아이템 줬을 때" 처럼 아이템별 분석이면 UNIT_ITEM_PERFORMANCE. 기물 자체 성능이면 UNIT_PERFORMANCE.
+
+  - ITEM_PERFORMANCE: 실제 매치 데이터 기반 특정 아이템의 전반적 성능 조회. 해당 아이템을 장착한 게임의 게임 수·평균 등수·승률 집계.
+    트리거: {쓸만해, 요즘 어때, 성능이 어때, 강해, 약해} + 아이템명
+    예) "요즘 무대 쓸만해?" → ITEM_PERFORMANCE
+    예) "구인수 성능이 어때?" → ITEM_PERFORMANCE
+    ⚠️ embedding_context에 대상이 [아이템]으로 표시되면 반드시 ITEM_PERFORMANCE. UNIT_PERFORMANCE 분류 금지.
+    ⚠️ "카이사한테 어떤 아이템?" 처럼 기물+아이템 조합이면 UNIT_ITEM_PERFORMANCE. 아이템 자체 성능이면 ITEM_PERFORMANCE.
+
+  - META_SYNERGY: 실제 매치 데이터 기반 시너지/특성별 성적 집계. match_participant_trait_tb + match_participant_info_tb 사용.
+    트리거: {1등 시너지, 1등 많이 하는 시너지, 승률 좋은 특성, 어떤 시너지가 강해, 시너지 통계}
+    예) "요즘 1등 가장 많이 하는 시너지가 뭐야" → META_SYNERGY
+    예) "어떤 특성이 승률 제일 높아?" → META_SYNERGY
+    ⚠️ 메타 덱 목록(metatft_comps 기반)이 아닌, 실제 경기 결과에서 집계하는 질문에만 사용.
+
+  - UNIT_ITEM_PERFORMANCE: 실제 매치 데이터 기반 특정 기물의 아이템별 평균 등수 집계. match_participant_unit_tb + item_meta_tb 사용.
+    트리거: {어떤 아이템 줬을 때, 아이템별 평균 등수, 아이템 성적, 실제 성능}
+    예) "카이사한테 어떤 아이템을 줬을 때 평균 등수가 제일 높아" → UNIT_ITEM_PERFORMANCE
+    ⚠️ UNIT_ITEM_RECOMMENDATION(메타 추천)과 구별: "실제로 어떤 아이템이 좋았어?"처럼 실전 데이터 집계면 UNIT_ITEM_PERFORMANCE.
+
+  - PATCH_COMPS: 패치 간 덱 티어 변화 조회. 두 패치 버전을 비교해 티어가 하락(너프) 또는 상승(버프)한 덱 목록.
+    트리거: {패치노트, 패치, 너프, 버프, 하향, 상향, 패치 후 약해진, 패치 후 강해진, 패치로 떨어진, 패치로 올라간, 패치 전후 비교}
+    예) "이번 패치로 너프 먹은 덱 알려줘" → PATCH_COMPS
+    예) "17.3 패치에서 버프 받은 조합은?" → PATCH_COMPS
+    예) "패치 후 강해진 덱 뭐야?" → PATCH_COMPS
+    ※ 패치 버전이 질문에 명시된 경우 해당 버전을 사용. 없으면 metatft_comps의 최신 2개 버전을 자동 사용.
+    ※ 너프(하향) 질문: tr_c.rnk > tr_p.rnk 조건. 버프(상향) 질문: tr_c.rnk < tr_p.rnk 조건.
+
   - GENERAL: 게임 규칙 설명, 일반 대화, 위 카테고리에 해당하지 않는 질문.
 
 nickname_rules: |
@@ -76,6 +109,11 @@ response_format_rules: |
   - 카테고리가 AUGMENT_COMPS → FILTER_BY_AUGMENT_UNIQUE
   - 카테고리가 BENCH_RECOMMENDATION → MULTI_UNIT_MATCHING
   - 카테고리가 ITEM_BUILDUP_COMPS → COMBINE_ITEM_AND_SEARCH
+  - 카테고리가 UNIT_PERFORMANCE → LIST
+  - 카테고리가 ITEM_PERFORMANCE → LIST
+  - 카테고리가 META_SYNERGY → LIST
+  - 카테고리가 UNIT_ITEM_PERFORMANCE → LIST
+  - 카테고리가 PATCH_COMPS → LIST
   - 카테고리가 GENERAL → TEXT
 
 followup_rules: |

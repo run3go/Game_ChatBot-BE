@@ -1,0 +1,60 @@
+category_name: "PATCH_COMPS"
+
+rules: |
+  - 사용 테이블:
+    - `tft.metatft_comps` : 메타 덱 조합 (patch_version, tier, comp_name, avg_place, pick_rate, win_rate, top4_rate, traits, champs_items, tags)
+
+  - [패치 버전 결정 규칙]
+    - 질문에 버전이 명시된 경우(예: '17.2b', '17.3'): 해당 값을 prev_patch, curr_patch로 직접 사용.
+    - 버전이 없는 경우: metatft_comps에서 최신 버전 → curr, 그 다음 버전 → prev 로 자동 사용.
+
+  - [티어 숫자 매핑 CTE - 필수 포함]
+    tier_rank AS (
+        SELECT 'S'::text AS tier, 1 AS rnk
+        UNION ALL SELECT 'A', 2
+        UNION ALL SELECT 'B', 3
+        UNION ALL SELECT 'C', 4
+        UNION ALL SELECT 'D', 5
+    )
+
+  - [너프된 덱 조회 - 티어 하락 (너프/하향 키워드)]
+    WHERE tr_c.rnk > tr_p.rnk  -- 현재 등급 숫자가 더 크면 티어 하락
+    ORDER BY tier_drop DESC, p.comp_name ASC
+
+  - [버프된 덱 조회 - 티어 상승 (버프/상향 키워드)]
+    WHERE tr_c.rnk < tr_p.rnk  -- 현재 등급 숫자가 더 작으면 티어 상승
+    ORDER BY tier_rise DESC, p.comp_name ASC
+
+  - [공통 SELECT 컬럼]
+    - comp_name, prev_tier, curr_tier, tier_drop (또는 tier_rise)
+
+  - [전체 패턴 예시]
+    WITH tier_rank AS (
+        SELECT 'S'::text AS tier, 1 AS rnk
+        UNION ALL SELECT 'A', 2
+        UNION ALL SELECT 'B', 3
+        UNION ALL SELECT 'C', 4
+        UNION ALL SELECT 'D', 5
+    ),
+    prev_patch AS (
+        SELECT comp_name, tier
+        FROM tft.metatft_comps
+        WHERE patch_version = '{이전버전}'
+    ),
+    curr_patch AS (
+        SELECT comp_name, tier
+        FROM tft.metatft_comps
+        WHERE patch_version = '{현재버전}'
+    )
+    SELECT
+        p.comp_name,
+        p.tier AS prev_tier,
+        c.tier AS curr_tier,
+        ABS(tr_c.rnk - tr_p.rnk) AS tier_change
+    FROM prev_patch p
+    JOIN curr_patch c ON p.comp_name = c.comp_name
+    JOIN tier_rank tr_p ON p.tier = tr_p.tier
+    JOIN tier_rank tr_c ON c.tier = tr_c.tier
+    WHERE <너프: tr_c.rnk > tr_p.rnk | 버프: tr_c.rnk < tr_p.rnk>
+    ORDER BY tier_change DESC, p.comp_name ASC
+    LIMIT 10;

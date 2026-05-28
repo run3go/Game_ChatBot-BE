@@ -1,0 +1,38 @@
+category_name: "ITEM_PERFORMANCE"
+
+rules: |
+  - 사용 테이블:
+    - `tft.item_meta_tb`               : 아이템 메타 (item_name, kor_name, season)
+    - `tft.match_participant_unit_tb`  : 참가자별 기물 정보 (match_user_id, item_names text[])
+    - `tft.match_participant_info_tb`  : 참가자 정보 (match_user_id, placement, win)
+
+  - ⚠️ match_ 접두사 테이블에는 patch_version 컬럼이 없음. latest_patch CTE 사용 금지.
+
+  - [아이템 영문 ID 조회]
+    - item_meta_tb에서 kor_name ILIKE '%{아이템명}%' 로 아이템 영문 ID(item_name)를 추출.
+    - season = 'set17' 조건 필수.
+
+  - [아이템 장착 참가자 추출 패턴 - && 배열 연산자]
+    - item_names(text[]) 배열과 대상 아이템 ID 배열이 겹치는 참가자를 추출.
+    - 한 참가자가 여러 기물에 같은 아이템을 줬어도 한 번만 집계: DISTINCT match_user_id.
+    WITH target_item AS (
+        SELECT item_name
+        FROM tft.item_meta_tb
+        WHERE season = 'set17'
+          AND kor_name ILIKE '%{아이템명}%'
+    ),
+    holders AS (
+        SELECT DISTINCT mu.match_user_id
+        FROM tft.match_participant_unit_tb mu
+        WHERE mu.item_names && ARRAY(SELECT item_name FROM target_item)::text[]
+    )
+    SELECT
+        COUNT(*) AS games,
+        ROUND(AVG(p.placement), 2) AS avg_place,
+        ROUND(AVG(CASE WHEN p.win THEN 1 ELSE 0 END) * 100, 2) AS win_rate_pct
+    FROM holders h
+    JOIN tft.match_participant_info_tb p ON h.match_user_id = p.match_user_id;
+
+  - [SELECT 컬럼]
+    - games(게임 수), avg_place(평균 등수), win_rate_pct(승률%) 반드시 포함.
+    - win 컬럼은 boolean이므로 CASE WHEN p.win THEN 1 ELSE 0 END 패턴 사용.

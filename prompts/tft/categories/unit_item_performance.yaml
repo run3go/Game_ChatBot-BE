@@ -1,0 +1,48 @@
+category_name: "UNIT_ITEM_PERFORMANCE"
+
+rules: |
+  - 사용 테이블:
+    - `tft.match_participant_unit_tb`  : 참가자별 기물 정보 (match_user_id, unit_name, item_names text[])
+    - `tft.unit_meta_tb`               : 기물 메타 (unit_name, kor_name)
+    - `tft.match_participant_info_tb`  : 참가자 정보 (match_user_id, placement)
+    - `tft.item_meta_tb`               : 아이템 메타 (item_name, kor_name, season)
+
+  - [기물 이름 매핑]
+    - unit_meta_tb의 kor_name으로 기물을 특정한 뒤 unit_name(영문 ID)을 추출.
+    - unit_meta_tb에는 여러 시즌 데이터가 있을 수 있으므로 ORDER BY fetched_at DESC LIMIT 1 또는 DISTINCT ON 활용.
+
+  - [아이템 배열 UNNEST 패턴]
+    - item_names(text[])를 CROSS JOIN LATERAL unnest()로 펼쳐 아이템별 행을 생성.
+    - CROSS JOIN LATERAL unnest(k.item_names) AS item_id
+
+  - [아이템 이름 정규화]
+    - item_meta_tb와 LEFT JOIN(season = 'set17', item_name = item_id)으로 한글명 변환.
+    - 한글명 없으면 COALESCE로 item_id 폴백.
+
+  - [표본 필터]
+    - HAVING COUNT(*) >= 5 로 표본이 너무 적은 아이템 제외.
+
+  - [전체 패턴 예시]
+    WITH target_units AS (
+        SELECT mu.match_user_id, mu.item_names
+        FROM tft.match_participant_unit_tb mu
+        JOIN tft.unit_meta_tb um ON mu.unit_name = um.unit_name
+        WHERE um.kor_name = '{기물명}'
+    ),
+    item_kor AS (
+        SELECT item_name, kor_name
+        FROM tft.item_meta_tb
+        WHERE season = 'set17'
+    )
+    SELECT
+        COALESCE(ik.kor_name, item_id) AS item_name,
+        COUNT(*) AS games,
+        ROUND(AVG(p.placement), 2) AS avg_place
+    FROM target_units k
+    JOIN tft.match_participant_info_tb p ON k.match_user_id = p.match_user_id
+    CROSS JOIN LATERAL unnest(k.item_names) AS item_id
+    LEFT JOIN item_kor ik ON ik.item_name = item_id
+    GROUP BY COALESCE(ik.kor_name, item_id)
+    HAVING COUNT(*) >= 5
+    ORDER BY avg_place ASC
+    LIMIT 10;

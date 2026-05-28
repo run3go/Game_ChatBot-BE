@@ -1,0 +1,31 @@
+category_name: "UNIT_PERFORMANCE"
+
+rules: |
+  - 사용 테이블:
+    - `tft.match_participant_unit_tb`  : 참가자별 기물 정보 (match_user_id, unit_name, tier)
+    - `tft.unit_meta_tb`               : 기물 메타 (unit_name, kor_name)
+    - `tft.match_participant_info_tb`  : 참가자 정보 (match_user_id, placement, win)
+
+  - ⚠️ match_ 접두사 테이블에는 patch_version 컬럼이 없음. latest_patch CTE 사용 금지.
+
+  - [기물 조회 패턴]
+    - unit_meta_tb의 kor_name으로 기물을 특정한 뒤 unit_name(영문 ID)을 추출.
+    - JOIN tft.unit_meta_tb um ON mu.unit_name = um.unit_name
+    - WHERE um.kor_name = '{기물명}'
+
+  - [성급별 집계 패턴]
+    SELECT
+        mu.tier AS star_level,
+        COUNT(*) AS games,
+        ROUND(AVG(p.placement), 2) AS avg_place,
+        ROUND(AVG(CASE WHEN p.win THEN 1 ELSE 0 END) * 100, 2) AS win_rate_pct
+    FROM tft.match_participant_unit_tb mu
+    JOIN tft.unit_meta_tb um ON mu.unit_name = um.unit_name
+    JOIN tft.match_participant_info_tb p ON mu.match_user_id = p.match_user_id
+    WHERE um.kor_name = '{기물명}'
+    GROUP BY mu.tier
+    ORDER BY mu.tier ASC;
+
+  - [SELECT 컬럼]
+    - star_level(성급), games(게임 수), avg_place(평균 등수), win_rate_pct(승률%) 반드시 포함.
+    - win 컬럼은 boolean이므로 CASE WHEN p.win THEN 1 ELSE 0 END 패턴 사용.

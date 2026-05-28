@@ -1,3 +1,4 @@
+import copy
 import re
 import logging
 import threading
@@ -193,33 +194,36 @@ class TFTService:
             "league": ranked_entry,
         }
 
-        strip = lambda s: re.sub(r'^(?:TFT|Set)\d+_?', '', s, flags=re.IGNORECASE).lower()
-        umap = {strip(r["unit_name"]): r["kor_name"] for r in self.db.execute(text("SELECT unit_name, kor_name FROM tft.unit_meta_tb WHERE kor_name IS NOT NULL AND unit_name IS NOT NULL")).mappings()}
-        tmap = {strip(r["eng_name"]): r["kor_name"] for r in self.db.execute(text("SELECT eng_name, kor_name FROM tft.trait_meta_tb WHERE kor_name IS NOT NULL AND eng_name IS NOT NULL")).mappings()}
-        amap = {strip(r["item_name"]): r["kor_name"] for r in self.db.execute(text("SELECT item_name, kor_name FROM tft.item_meta_tb WHERE kor_name IS NOT NULL AND item_name IS NOT NULL")).mappings()}
-        for m in data["matches"]:
+        # LLM용 데이터는 deepcopy — 원본 data는 프론트 직렬화에 쓰이므로 변경 금지
+        llm_data = copy.deepcopy(data)
+
+        strip_prefix = lambda s: re.sub(r'^(?:TFT|Set)\d+_?', '', s, flags=re.IGNORECASE).lower()
+        umap = {strip_prefix(r["unit_name"]): r["kor_name"] for r in self.db.execute(text("SELECT unit_name, kor_name FROM tft.unit_meta_tb WHERE kor_name IS NOT NULL AND unit_name IS NOT NULL")).mappings()}
+        tmap = {strip_prefix(r["eng_name"]): r["kor_name"] for r in self.db.execute(text("SELECT eng_name, kor_name FROM tft.trait_meta_tb WHERE kor_name IS NOT NULL AND eng_name IS NOT NULL")).mappings()}
+        amap = {strip_prefix(r["item_name"]): r["kor_name"] for r in self.db.execute(text("SELECT item_name, kor_name FROM tft.item_meta_tb WHERE kor_name IS NOT NULL AND item_name IS NOT NULL")).mappings()}
+        for m in llm_data["matches"]:
             for u in m["units"]:
-                key = strip(u["name"])
+                key = strip_prefix(u["name"])
                 u["name"] = umap.get(key, u["name"])
             for t in m["traits"]:
-                key = strip(t["name"])
+                key = strip_prefix(t["name"])
                 t["name"] = tmap.get(key) or _TRAIT_KO.get(key) or key
-            m["augments"] = [amap.get(strip(a), a) for a in m.get("augments", [])]
+            m["augments"] = [amap.get(strip_prefix(a), a) for a in m.get("augments", [])]
 
         # 아이템 3개 풀착용 유닛을 Python에서 직접 집계 (LLM이 JSON 배열을 직접 세는 것은 불안정)
         core_counter: Counter = Counter()
-        for m in data["matches"]:
+        for m in llm_data["matches"]:
             for u in m["units"]:
                 if len(u.get("items", [])) == 3:
                     tier_suffix = f" {u['tier']}성" if u.get("tier", 1) >= 2 else ""
                     core_counter[f"{u['name']}{tier_suffix}"] += 1
-        data["core_units"] = [
+        llm_data["core_units"] = [
             {"name": name, "count": cnt}
             for name, cnt in core_counter.most_common(3)
             if cnt >= 2
         ]
 
-        yield "result_text", self.answer_generator.answer_tft_api(question, data, history)
+        yield "result_text", self.answer_generator.answer_tft_api(question, llm_data, history)
 
         if "puuid" in data:
             game_name, tag_line = summoner_name.split("#", 1)

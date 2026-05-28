@@ -95,30 +95,28 @@ class EmbeddingLookupRetriever(EmbeddingsMixin):
     ) -> list[dict]:
         keywords = [question]
 
-        executor = ThreadPoolExecutor(max_workers=1)
-        embed_future = executor.submit(self._fetch_vectors, keywords)
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            embed_future = executor.submit(self._fetch_vectors, keywords)
 
-        try:
-            text_results = self._text_search(db, keywords, candidate_k)
-        except Exception:
-            logger.exception("embedding_lookup 텍스트 검색 실패")
-            db.rollback()
-            text_results = []
+            try:
+                text_results = self._text_search(db, keywords, candidate_k)
+            except Exception:
+                logger.exception("embedding_lookup 텍스트 검색 실패")
+                db.rollback()
+                text_results = []
 
-        logger.info("embedding_lookup 텍스트 매칭: %s", [r["formal_name"] for r in text_results])
+            logger.info("embedding_lookup 텍스트 매칭: %s", [r["formal_name"] for r in text_results])
 
-        try:
-            vectors = embed_future.result(timeout=10)
-            executor.shutdown(wait=False)
-            if vectors:
-                vector_results = self._vector_search_with_vectors(db, vectors, candidate_k, fallback_threshold)
-            else:
+            try:
+                vectors = embed_future.result(timeout=10)
+                if vectors:
+                    vector_results = self._vector_search_with_vectors(db, vectors, candidate_k, fallback_threshold)
+                else:
+                    vector_results = []
+            except Exception:
+                logger.exception("embedding_lookup 벡터 검색 실패")
+                db.rollback()
                 vector_results = []
-        except Exception:
-            logger.exception("embedding_lookup 벡터 검색 실패")
-            db.rollback()
-            vector_results = []
-            executor.shutdown(wait=False)
 
         seen = {r["formal_name"] for r in text_results}
         merged = list(text_results)
@@ -191,6 +189,27 @@ class EmbeddingLookupRetriever(EmbeddingsMixin):
             type_str = f" [{type_label}]" if type_label else ""
             hints.append(f"{matched}→{formal_name}{type_str}" if matched else f"{formal_name}{type_str}")
         return ", ".join(hints) if hints else "없음"
+
+    def top_matches_with_scores(self, db: Session, question: str, k: int = 3) -> list[dict]:
+        """게임 감지용 — 벡터 유사도 상위 k개를 score 포함해서 반환."""
+        vectors = self._fetch_vectors([question])
+        if not vectors:
+            return []
+        table = f"{self._schema}.embedding_lookup"
+        sql = (
+            f"SELECT formal_name, 1 - (embedding <=> CAST(:vec AS vector)) AS score"
+            f" FROM {table}"
+            f" WHERE embedding IS NOT NULL"
+            f" ORDER BY embedding <=> CAST(:vec AS vector)"
+            f" LIMIT :k"
+        )
+        try:
+            rows = db.execute(text(sql), {"vec": str(vectors[0]), "k": k}).mappings().all()
+            return [{"formal_name": row["formal_name"], "score": float(row["score"])} for row in rows]
+        except Exception:
+            logger.exception("top_matches_with_scores 실패 (%s)", self._schema)
+            db.rollback()
+            return []
 
     def format_context(self, entries: list[dict]) -> str:
         if not entries:

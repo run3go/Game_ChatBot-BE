@@ -15,7 +15,7 @@ GAME_NAMES: dict[str, str] = {
 
 GAME_KEYWORDS: dict[str, list[str]] = {
     "LOSTARK": ["로스트아크", "로아", "어비스", "레이드", "각인", "아크패시브", "아크그리드", "보석", "원정대", "경매장", "거래소", "카드", "어빌리티스톤"],
-    "TFT": ["롤토체스", "롤체", "tft", "증강체", "챔피언", "특성", "덱", "포지셔닝", "조합", "증강", "라운드", "시너지"],
+    "TFT": ["롤토체스", "롤체", "tft", "증강체", "챔피언", "특성", "덱", "포지셔닝", "조합", "증강", "라운드", "시너지", "승률", "순방"],
 }
 
 
@@ -37,7 +37,39 @@ class GameDetector:
     def __init__(self, llm):
         self.llm = llm
 
-    def detect(self, question: str) -> GameType:
+    def _build_embedding_hints(self, question: str, db) -> str:
+        from llm.embedding_lookup_retriever import EMBEDDING_LOOKUP
+
+        lines = ["[각 게임 용어 DB 벡터 유사도 힌트]"]
+        vectors = None
+        for game_type, game_name in GAME_NAMES.items():
+            lookup = EMBEDDING_LOOKUP[game_type]
+            if vectors is None:
+                vectors = lookup._fetch_vectors([question])
+            if not vectors:
+                break
+            try:
+                matches = lookup.top_matches_with_scores(db, question, k=3)
+            except Exception:
+                logger.exception("embedding hint 실패 (%s)", game_type)
+                matches = []
+            if matches:
+                top = matches[0]
+                others = [f"'{m['formal_name']}'({m['score']:.3f})" for m in matches[1:]]
+                other_str = f", {', '.join(others)}" if others else ""
+                lines.append(f"- {game_name}: 최고 유사도 {top['score']:.3f} ('{top['formal_name']}'{other_str})")
+            else:
+                lines.append(f"- {game_name}: 관련 용어 없음")
+        return "\n".join(lines)
+
+    def detect(self, question: str, db=None) -> GameType:
+        hint_section = ""
+        if db is not None:
+            try:
+                hint_section = self._build_embedding_hints(question, db)
+            except Exception:
+                logger.exception("embedding hint 생성 실패, 힌트 없이 진행")
+
         prompt = ChatPromptTemplate.from_template("""
         다음 질문이 어떤 게임에 관한 질문인지 판단해.
 
@@ -45,13 +77,15 @@ class GameDetector:
         - TFT (롤토체스): 증강체, 챔피언, 특성, 덱, 라운드, 골드, 포지셔닝, 조합 등
         - UNKNOWN: 어느 게임인지 판단 불가, 일반 대화, 인사
 
+        {hint_section}
+
         반드시 LOSTARK / TFT / UNKNOWN 중 하나만 답해. 다른 말은 절대 하지 마.
 
         [질문]
         {question}
         """)
         try:
-            result = (prompt | self.llm).invoke({"question": question})
+            result = (prompt | self.llm).invoke({"question": question, "hint_section": hint_section})
             answer = result.content.strip().upper()
             if answer in ("LOSTARK", "TFT", "UNKNOWN"):
                 return answer
