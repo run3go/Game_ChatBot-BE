@@ -76,8 +76,8 @@ class EmbeddingLookupRetriever(EmbeddingsMixin):
                     }
 
         top = sorted(best.items(), key=lambda x: -x[1]["score"])[:5]
-        logger.info("embedding_lookup 벡터 점수 (상위 5): %s",
-                    [(name, round(e["score"], 4)) for name, e in top])
+        logger.debug("embedding_lookup 벡터 점수 (상위 5): %s",
+                     [(name, round(e["score"], 4)) for name, e in top])
 
         return [
             {key: val for key, val in e.items() if key != "score"}

@@ -197,31 +197,38 @@ class TFTService:
         # LLM용 데이터는 deepcopy — 원본 data는 프론트 직렬화에 쓰이므로 변경 금지
         llm_data = copy.deepcopy(data)
 
-        strip_prefix = lambda s: re.sub(r'^(?:TFT|Set)\d+_?', '', s, flags=re.IGNORECASE).lower()
-        umap = {strip_prefix(r["unit_name"]): r["kor_name"] for r in self.db.execute(text("SELECT unit_name, kor_name FROM tft.unit_meta_tb WHERE kor_name IS NOT NULL AND unit_name IS NOT NULL")).mappings()}
-        tmap = {strip_prefix(r["eng_name"]): r["kor_name"] for r in self.db.execute(text("SELECT eng_name, kor_name FROM tft.trait_meta_tb WHERE kor_name IS NOT NULL AND eng_name IS NOT NULL")).mappings()}
-        amap = {strip_prefix(r["item_name"]): r["kor_name"] for r in self.db.execute(text("SELECT item_name, kor_name FROM tft.item_meta_tb WHERE kor_name IS NOT NULL AND item_name IS NOT NULL")).mappings()}
-        for m in llm_data["matches"]:
-            for u in m["units"]:
-                key = strip_prefix(u["name"])
-                u["name"] = umap.get(key, u["name"])
-            for t in m["traits"]:
-                key = strip_prefix(t["name"])
-                t["name"] = tmap.get(key) or _TRAIT_KO.get(key) or key
-            m["augments"] = [amap.get(strip_prefix(a), a) for a in m.get("augments", [])]
+        try:
+            strip_prefix = lambda s: re.sub(r'^(?:TFT|Set)\d+_?', '', s, flags=re.IGNORECASE).lower()
+            umap = {strip_prefix(r["unit_name"]): r["kor_name"] for r in self.db.execute(text("SELECT unit_name, kor_name FROM tft.unit_meta_tb WHERE kor_name IS NOT NULL AND unit_name IS NOT NULL")).mappings()}
+            tmap = {strip_prefix(r["eng_name"]): r["kor_name"] for r in self.db.execute(text("SELECT eng_name, kor_name FROM tft.trait_meta_tb WHERE kor_name IS NOT NULL AND eng_name IS NOT NULL")).mappings()}
+            amap = {strip_prefix(r["item_name"]): r["kor_name"] for r in self.db.execute(text("SELECT item_name, kor_name FROM tft.item_meta_tb WHERE kor_name IS NOT NULL AND item_name IS NOT NULL")).mappings()}
+            for m in llm_data["matches"]:
+                for u in m["units"]:
+                    key = strip_prefix(u["name"])
+                    u["name"] = umap.get(key, u["name"])
+                for t in m["traits"]:
+                    key = strip_prefix(t["name"])
+                    t["name"] = tmap.get(key) or _TRAIT_KO.get(key) or key
+                m["augments"] = [amap.get(strip_prefix(a), a) for a in m.get("augments", [])]
 
-        # 아이템 3개 풀착용 유닛을 Python에서 직접 집계 (LLM이 JSON 배열을 직접 세는 것은 불안정)
-        core_counter: Counter = Counter()
-        for m in llm_data["matches"]:
-            for u in m["units"]:
-                if len(u.get("items", [])) == 3:
-                    tier_suffix = f" {u['tier']}성" if u.get("tier", 1) >= 2 else ""
-                    core_counter[f"{u['name']}{tier_suffix}"] += 1
-        llm_data["core_units"] = [
-            {"name": name, "count": cnt}
-            for name, cnt in core_counter.most_common(3)
-            if cnt >= 2
-        ]
+            llm_data["comp_stats"] = _map_meta_comps(self.db, llm_data["matches"])
+            for orig, llm in zip(data["matches"], llm_data["matches"]):
+                orig["matched_comp"] = llm.get("matched_comp")
+
+            # 아이템 3개 풀착용 유닛을 Python에서 직접 집계 (LLM이 JSON 배열을 직접 세는 것은 불안정)
+            core_counter: Counter = Counter()
+            for m in llm_data["matches"]:
+                for u in m["units"]:
+                    if len(u.get("items", [])) == 3:
+                        tier_suffix = f" {u['tier']}성" if u.get("tier", 1) >= 2 else ""
+                        core_counter[f"{u['name']}{tier_suffix}"] += 1
+            llm_data["core_units"] = [
+                {"name": name, "count": cnt}
+                for name, cnt in core_counter.most_common(3)
+                if cnt >= 2
+            ]
+        except Exception:
+            logger.exception("TFT LLM 데이터 준비 실패 (summoner=%s)", summoner_name)
 
         yield "result_text", self.answer_generator.answer_tft_api(question, llm_data, history)
 
@@ -252,6 +259,78 @@ class TFTService:
         if sql:
             yield "sql", sql
         yield "result", result
+
+
+def _map_meta_comps(db, matches: list[dict]) -> list[dict]:
+    """최신 패치 메타 덱과 각 게임 유닛을 비교해 matched_comp를 붙이고, 덱별 통계를 반환."""
+    try:
+        rows = db.execute(text("""
+            WITH latest AS (SELECT MAX(patch_version) AS v FROM tft.metatft_comps)
+            SELECT comp_name, champs_items
+            FROM tft.metatft_comps
+            JOIN latest ON patch_version = latest.v
+        """)).mappings().all()
+    except Exception:
+        logger.exception("메타 덱 조회 실패 (_map_meta_comps)")
+        db.rollback()
+        for m in matches:
+            m["matched_comp"] = None
+        return []
+
+    comps = []
+    for row in rows:
+        # "챔피언(아이템1,아이템2) | 챔피언2..." 또는 "챔피언(아이템1,아이템2), 챔피언2..." 형식
+        raw = re.sub(r'\([^)]*\)', '', row["champs_items"] or "")
+        champs = {n.strip() for n in re.split(r'[|,]', raw) if n.strip()}
+        if champs:
+            comps.append({"comp_name": row["comp_name"], "champs": champs})
+
+    for m in matches:
+        game_units = {u["name"] for u in m.get("units", [])}
+        best_name, best_score = None, 0.0
+        for comp in comps:
+            score = len(game_units & comp["champs"]) / len(comp["champs"])
+            if score > best_score:
+                best_score, best_name = score, comp["comp_name"]
+        m["matched_comp"] = best_name if best_score >= 0.55 else None
+
+    stats: dict[str, dict] = {}
+    for m in matches:
+        comp = m.get("matched_comp") or "기타"
+        if comp not in stats:
+            stats[comp] = {"count": 0, "wins": 0, "top4": 0}
+        stats[comp]["count"] += 1
+        if m.get("placement") == 1:
+            stats[comp]["wins"] += 1
+        if m.get("placement", 9) <= 4:
+            stats[comp]["top4"] += 1
+
+    # 2판 미만 덱은 "기타"로 통합
+    merged: dict[str, dict] = {}
+    for name, s in stats.items():
+        key = name if s["count"] >= 2 else "기타"
+        if key not in merged:
+            merged[key] = {"count": 0, "wins": 0, "top4": 0}
+        merged[key]["count"] += s["count"]
+        merged[key]["wins"] += s["wins"]
+        merged[key]["top4"] += s["top4"]
+
+    result = []
+    etc = None
+    for name, s in sorted(merged.items(), key=lambda x: -x[1]["count"]):
+        entry = {
+            "comp_name": name,
+            "count": s["count"],
+            "win_rate": round(s["wins"] / s["count"] * 100) if s["count"] else 0,
+            "top4_rate": round(s["top4"] / s["count"] * 100) if s["count"] else 0,
+        }
+        if name == "기타":
+            etc = entry
+        else:
+            result.append(entry)
+    if etc:
+        result.append(etc)
+    return result
 
 
 def _find_participant(match: dict, puuid: str) -> dict | None:

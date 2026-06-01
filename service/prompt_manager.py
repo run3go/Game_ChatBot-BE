@@ -1,5 +1,8 @@
+import logging
 import yaml
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 GAME_NAMES = {
     "LOSTARK": "로스트아크",
@@ -24,7 +27,7 @@ class PromptManager:
                     return data if data else {}
             return {}
         except Exception as e:
-            print(f"YAML 로드 실패 ({file_name}): {e}")
+            logger.exception("YAML 로드 실패 (%s)", file_name)
             return {}
 
     def _get(self, cache: dict, game_type: str, file_name: str) -> dict:

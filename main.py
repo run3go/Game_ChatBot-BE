@@ -30,7 +30,10 @@ async def lifespan(app: FastAPI):
 
     # 백그라운드에서 모델 로딩 — health check를 블로킹하지 않음
     loop = asyncio.get_event_loop()
-    loop.run_in_executor(None, CROSS_ENCODER._get_model)
+    fut = loop.run_in_executor(None, CROSS_ENCODER._get_model)
+    fut.add_done_callback(
+        lambda f: logger.warning("CrossEncoder 모델 로딩 실패: %s", f.exception()) if f.exception() else None
+    )
 
     llms = create_llm_instances()
 
